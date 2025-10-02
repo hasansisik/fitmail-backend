@@ -116,6 +116,17 @@ const UserSchema = new mongoose.Schema(
         message: 'Geçerli bir mail adresi giriniz'
       }
     },
+    recoveryEmail: {
+      type: String,
+      lowercase: true,
+      validate: {
+        validator: function(v) {
+          if (!v) return true; // Optional field
+          return /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(v);
+        },
+        message: 'Geçerli bir kurtarıcı e-posta adresi giriniz'
+      }
+    },
     mails: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Mail' }],
     status: {
       type: String,

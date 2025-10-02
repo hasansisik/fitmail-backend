@@ -13,14 +13,14 @@ const register = async (req, res, next) => {
       name,
       surname,
       email,
+      recoveryEmail,
       password,
       courseTrial,
       picture,
       expoPushToken,
       age,
       birthDate,
-      gender,
-      mailAddress
+      gender
     } = req.body;
 
     //check email
@@ -29,26 +29,17 @@ const register = async (req, res, next) => {
       throw new CustomError.BadRequestError("Bu e-posta adresi zaten kayıtlı.");
     }
 
-    // Mail adresi kontrolü
-    if (mailAddress) {
-      const domain = process.env.MAIL_DOMAIN || 'mailaderim.com';
-      if (!mailAddress.endsWith(`@${domain}`)) {
+    // Mail adresi kontrolü - email zaten @fitmail.com ile geliyor
+    if (email) {
+      const domain = 'fitmail.com';
+      if (!email.endsWith(`@${domain}`)) {
         throw new CustomError.BadRequestError(`Mail adresi @${domain} ile bitmelidir`);
       }
-      
-      const mailAddressExists = await User.findOne({ mailAddress });
-      if (mailAddressExists) {
-        throw new CustomError.BadRequestError("Bu mail adresi zaten kullanılıyor.");
-      }
     }
-
-    //token create
-    const verificationCode = Math.floor(1000 + Math.random() * 9000);
 
     // Create Auth document
     const auth = new Auth({
       password,
-      verificationCode,
     });
     await auth.save();
 
@@ -70,11 +61,12 @@ const register = async (req, res, next) => {
       age,
       birthDate: birthDate ? new Date(birthDate) : undefined,
       gender,
-      mailAddress,
+      mailAddress: email, // Use email as mailAddress
+      recoveryEmail: recoveryEmail || undefined,
       auth: auth._id,
       profile: profile._id,
-      isVerified: false,
-      status: 'inactive',
+      isVerified: true, // No email verification needed
+      status: 'active', // User is immediately active
     });
 
     await user.save();
@@ -101,15 +93,9 @@ const register = async (req, res, next) => {
       maxAge: 7 * 24 * 60 * 60 * 1000, //7 days
     });
 
-    await sendVerificationEmail({
-      name: user.name,
-      email: user.email,
-      verificationCode,
-    });
-
     res.json({
       message:
-        "Kullanıcı başarıyla oluşturuldu. Lütfen email adresini doğrula.",
+        "Kullanıcı başarıyla oluşturuldu.",
       user: {
         _id: user._id,
         name: user.name,
@@ -160,24 +146,6 @@ const login = async (req, res, next) => {
 
     if (!isPasswordCorrect) {
       throw new CustomError.UnauthenticatedError("Kayıtlı şifreniz yanlış!");
-    }
-    if (!user.isVerified) {
-      // Generate new verification code and send email
-      const verificationCode = Math.floor(1000 + Math.random() * 9000);
-      user.auth.verificationCode = verificationCode;
-      await user.auth.save();
-
-      await sendVerificationEmail({
-        name: user.name,
-        email: user.email,
-        verificationCode: user.auth.verificationCode,
-      });
-
-      return res.status(403).json({
-        message: "Lütfen e-postanızı doğrulayın !",
-        requiresVerification: true,
-        email: user.email,
-      });
     }
     if (user.status === 'inactive') {
       throw new CustomError.UnauthenticatedError("Hesabınız pasif durumda. Lütfen yönetici ile iletişime geçin.");
