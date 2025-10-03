@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
+
 const AddressSchema = new mongoose.Schema({
   street: { type: String, trim: true },
   city: { type: String, trim: true },
@@ -142,6 +143,27 @@ const UserSchema = new mongoose.Schema(
         message: '{VALUE} geçerli bir tema değil'
       },
       default: 'light'
+    },
+    settings: {
+      language: {
+        type: String,
+        enum: ['tr', 'en', 'de', 'fr'],
+        default: 'tr'
+      },
+      timezone: {
+        type: String,
+        default: 'Europe/Istanbul'
+      },
+      dateFormat: {
+        type: String,
+        enum: ['DD/MM/YYYY', 'MM/DD/YYYY', 'YYYY-MM-DD'],
+        default: 'DD/MM/YYYY'
+      },
+      timeFormat: {
+        type: String,
+        enum: ['12', '24'],
+        default: '24'
+      }
     }
   },
   { timestamps: true }

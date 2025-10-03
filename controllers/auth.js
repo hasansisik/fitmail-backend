@@ -442,10 +442,9 @@ const editProfile = async (req, res) => {
     const allowedUpdates = [
       "name",
       "surname",
-      "email",
+      "recoveryEmail",
       "password",
       "address",
-      "phoneNumber",
       "courseTrial",
       "picture",
       "birthDate",
@@ -479,17 +478,9 @@ const editProfile = async (req, res) => {
       });
     }
 
-    if (req.body.email && req.body.email !== user.email) {
-      const verificationCode = Math.floor(1000 + Math.random() * 9000);
-      user.email = req.body.email;
-      user.auth.verificationCode = verificationCode;
-      user.isVerified = false;
-
-      await sendVerificationEmail({
-        name: user.name,
-        email: user.email,
-        verificationCode: verificationCode,
-      });
+    // Email değişikliğini kaldırdık - sadece recoveryEmail'e izin veriyoruz
+    if (req.body.recoveryEmail !== undefined) {
+      user.recoveryEmail = req.body.recoveryEmail;
     }
 
     // Mail adresi kontrolü
@@ -529,23 +520,9 @@ const editProfile = async (req, res) => {
       await user.auth.save();
     }
 
-    // Handle phone number
-    if (req.body.phoneNumber) {
-      if (!user.profile) {
-        const profile = new Profile({
-          phoneNumber: req.body.phoneNumber,
-          user: user._id,
-        });
-        await profile.save();
-        user.profile = profile._id;
-      } else {
-        user.profile.phoneNumber = req.body.phoneNumber;
-        await user.profile.save();
-      }
-    }
 
     // Handle profile picture
-    if (req.body.picture) {
+    if (req.body.picture !== undefined) {
       if (!user.profile) {
         const profile = new Profile({
           picture: req.body.picture,
@@ -624,8 +601,14 @@ const editProfile = async (req, res) => {
 
     await user.save();
 
+    // Return updated user data
+    const updatedUser = await User.findById(req.user.userId)
+      .populate("profile")
+      .populate("address");
+
     res.json({
       message: "Profil başarıyla güncellendi.",
+      user: updatedUser
     });
   } catch (err) {
     console.error(err);
@@ -672,6 +655,114 @@ const verifyPassword = async (req, res, next) => {
     res.json({
       message: "Şifre doğrulandı.",
       isValid: true,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+//Change Password
+const changePassword = async (req, res, next) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        message: "Mevcut şifre ve yeni şifre gereklidir.",
+      });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        message: "Yeni şifre en az 6 karakter olmalıdır.",
+      });
+    }
+
+    const user = await User.findById(req.user.userId).populate({
+      path: "auth",
+      select: "+password",
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        message: "Kullanıcı bulunamadı.",
+      });
+    }
+
+    // Verify current password
+    const isCurrentPasswordCorrect = await bcrypt.compare(
+      currentPassword,
+      user.auth.password
+    );
+
+    if (!isCurrentPasswordCorrect) {
+      return res.status(400).json({
+        message: "Mevcut şifre yanlış.",
+      });
+    }
+
+    // Update password
+    user.auth.password = newPassword;
+    await user.auth.save();
+
+    res.json({
+      message: "Şifre başarıyla değiştirildi.",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+//Update Settings
+const updateSettings = async (req, res, next) => {
+  try {
+    const { language, timezone, dateFormat, timeFormat } = req.body;
+
+    const user = await User.findById(req.user.userId);
+
+    if (!user) {
+      return res.status(404).json({
+        message: "Kullanıcı bulunamadı.",
+      });
+    }
+
+    // Update user settings with validation
+    if (language !== undefined) {
+      if (!['tr', 'en', 'de', 'fr'].includes(language)) {
+        return res.status(400).json({
+          message: "Geçersiz dil seçimi.",
+        });
+      }
+      user.settings.language = language;
+    }
+    
+    if (timezone !== undefined) {
+      user.settings.timezone = timezone;
+    }
+    
+    if (dateFormat !== undefined) {
+      if (!['DD/MM/YYYY', 'MM/DD/YYYY', 'YYYY-MM-DD'].includes(dateFormat)) {
+        return res.status(400).json({
+          message: "Geçersiz tarih formatı.",
+        });
+      }
+      user.settings.dateFormat = dateFormat;
+    }
+    
+    if (timeFormat !== undefined) {
+      if (!['12', '24'].includes(timeFormat)) {
+        return res.status(400).json({
+          message: "Geçersiz saat formatı.",
+        });
+      }
+      user.settings.timeFormat = timeFormat;
+    }
+
+    await user.save();
+
+    res.json({
+      message: "Ayarlar başarıyla güncellendi.",
+      settings: user.settings
     });
   } catch (error) {
     next(error);
@@ -1180,6 +1271,8 @@ module.exports = {
   againEmail,
   editProfile,
   verifyPassword,
+  changePassword,
+  updateSettings,
   deleteAccount,
   deleteUser,
   updateUserRole,
