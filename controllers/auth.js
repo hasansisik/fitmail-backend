@@ -4,6 +4,7 @@ const { StatusCodes } = require("http-status-codes");
 const CustomError = require("../errors");
 const { sendResetPasswordEmail, sendVerificationEmail } = require("../helpers");
 const { generateToken } = require("../services/token.service");
+const mailgunService = require("../services/mailgun.service");
 const bcrypt = require("bcrypt");
 
 //Register
@@ -29,9 +30,9 @@ const register = async (req, res, next) => {
       throw new CustomError.BadRequestError("Bu e-posta adresi zaten kayıtlı.");
     }
 
-    // Mail adresi kontrolü - email zaten @fitmail.com ile geliyor
+    // Mail adresi kontrolü - email zaten @gozdedijital.xyz ile geliyor
     if (email) {
-      const domain = 'fitmail.com';
+      const domain = 'gozdedijital.xyz';
       if (!email.endsWith(`@${domain}`)) {
         throw new CustomError.BadRequestError(`Mail adresi @${domain} ile bitmelidir`);
       }
@@ -76,6 +77,28 @@ const register = async (req, res, next) => {
     profile.user = user._id;
     await Promise.all([auth.save(), profile.save()]);
 
+    // Mailgun'da mail route oluştur ve hoşgeldin maili gönder
+    try {
+      // Mail route oluştur
+      const routeResult = await mailgunService.createMailRoute(email);
+      if (routeResult.success) {
+        console.log('Mailgun route created for:', email);
+      } else {
+        console.warn('Failed to create Mailgun route:', routeResult.error);
+      }
+
+      // Hoşgeldin maili gönder
+      const welcomeEmailResult = await mailgunService.sendWelcomeEmail(email, name);
+      if (welcomeEmailResult.success) {
+        console.log('Welcome email sent to:', email);
+      } else {
+        console.warn('Failed to send welcome email:', welcomeEmailResult.error);
+      }
+    } catch (mailgunError) {
+      // Mailgun hatalarını logla ama kayıt işlemini engelleme
+      console.error('Mailgun error during registration:', mailgunError);
+    }
+
     const accessToken = await generateToken(
       { userId: user._id, role: user.role },
       "7d",
@@ -95,7 +118,7 @@ const register = async (req, res, next) => {
 
     res.json({
       message:
-        "Kullanıcı başarıyla oluşturuldu.",
+        "Kullanıcı başarıyla oluşturuldu. Hoşgeldin maili gönderildi!",
       user: {
         _id: user._id,
         name: user.name,

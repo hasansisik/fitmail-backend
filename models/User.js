@@ -105,8 +105,7 @@ const UserSchema = new mongoose.Schema(
     // Mail sistemi için
     mailAddress: { 
       type: String, 
-      unique: true, 
-      sparse: true,
+      unique: false, // email ile aynı olacağı için unique kaldırıldı
       lowercase: true,
       validate: {
         validator: function(v) {

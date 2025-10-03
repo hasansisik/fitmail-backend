@@ -409,6 +409,81 @@ const testMailgunConfig = async (req, res, next) => {
   }
 };
 
+// Mailgun webhook handler - gelen mailleri almak için
+const handleMailgunWebhook = async (req, res, next) => {
+  try {
+    console.log('Mailgun webhook received:', req.body);
+    
+    const webhookData = req.body;
+    
+    // Mailgun webhook verisini kontrol et
+    if (!webhookData || !webhookData['recipient']) {
+      console.log('Invalid webhook data');
+      return res.status(StatusCodes.OK).json({ message: 'Webhook received' });
+    }
+
+    const recipient = webhookData['recipient'];
+    const sender = webhookData['sender'] || webhookData['from'];
+    const subject = webhookData['subject'] || 'No Subject';
+    const bodyPlain = webhookData['body-plain'] || webhookData['stripped-text'] || '';
+    const bodyHtml = webhookData['body-html'] || webhookData['stripped-html'] || '';
+    const timestamp = webhookData['timestamp'] || new Date().toISOString();
+    const messageId = webhookData['Message-Id'] || webhookData['message-id'];
+
+    console.log('Processing mail:', { recipient, sender, subject });
+
+    // Alıcı kullanıcıyı bul
+    const recipientUser = await User.findOne({ email: recipient });
+    
+    if (!recipientUser) {
+      console.log('Recipient user not found:', recipient);
+      return res.status(StatusCodes.OK).json({ message: 'User not found but webhook accepted' });
+    }
+
+    // Mail objesi oluştur
+    const mailData = {
+      from: {
+        email: sender,
+        name: sender.split('@')[0]
+      },
+      to: [{ email: recipient, name: recipient.split('@')[0] }],
+      subject,
+      content: bodyPlain,
+      htmlContent: bodyHtml || bodyPlain,
+      folder: 'inbox',
+      status: 'received',
+      isRead: false,
+      receivedAt: new Date(timestamp * 1000), // Unix timestamp to Date
+      messageId: messageId,
+      mailgunId: messageId,
+      user: recipientUser._id
+    };
+
+    // Mail'i veritabanına kaydet
+    const mail = new Mail(mailData);
+    await mail.save();
+
+    // Kullanıcının mail listesine ekle
+    recipientUser.mails.push(mail._id);
+    await recipientUser.save();
+
+    console.log('Mail saved successfully:', mail._id);
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      message: 'Mail received and saved',
+      mailId: mail._id
+    });
+  } catch (error) {
+    console.error('Webhook error:', error);
+    // Webhook hatalarında hata döndürme, Mailgun tekrar deneyebilir
+    res.status(StatusCodes.OK).json({ 
+      message: 'Webhook received but processing failed',
+      error: error.message 
+    });
+  }
+};
+
 module.exports = {
   sendMail,
   getInbox,
@@ -419,5 +494,6 @@ module.exports = {
   manageLabels,
   getMailStats,
   checkMailAddress,
-  testMailgunConfig
+  testMailgunConfig,
+  handleMailgunWebhook
 };

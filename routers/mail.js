@@ -9,11 +9,15 @@ const {
   manageLabels,
   getMailStats,
   checkMailAddress,
-  testMailgunConfig
+  testMailgunConfig,
+  handleMailgunWebhook
 } = require('../controllers/mail');
 const { isAuthenticated } = require('../middleware/authMiddleware');
 
 const router = express.Router();
+
+// Mailgun webhook - gelen mailleri almak için (authentication yok!)
+router.post('/webhook', express.json(), handleMailgunWebhook);
 
 // Mail gönderme
 router.post('/send', isAuthenticated, sendMail);
