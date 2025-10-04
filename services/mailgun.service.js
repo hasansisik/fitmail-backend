@@ -160,13 +160,10 @@ class MailgunService {
 
       // Ekler varsa ekle
       if (attachments && attachments.length > 0) {
-        attachments.forEach(attachment => {
-          messageData.attachment = messageData.attachment || [];
-          messageData.attachment.push({
-            filename: attachment.filename,
-            data: attachment.data
-          });
-        });
+        messageData.attachment = attachments.map(attachment => ({
+          filename: attachment.filename,
+          data: attachment.data
+        }));
       }
 
       const response = await this.mg.messages.create(this.domain, messageData);

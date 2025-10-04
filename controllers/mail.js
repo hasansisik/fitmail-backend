@@ -8,8 +8,13 @@ const mongoose = require("mongoose");
 // Mail gönderme
 const sendMail = async (req, res, next) => {
   try {
-    const { to, subject, content, htmlContent, cc, bcc, attachments, labels } = req.body;
+    const { to, subject, content, htmlContent, cc, bcc, labels } = req.body;
     const userId = req.user.userId;
+    const files = req.files || [];
+
+    console.log("sendMail request body:", req.body);
+    console.log("sendMail files:", files);
+    console.log("sendMail userId:", userId);
 
     if (!to || !subject || !content) {
       throw new CustomError.BadRequestError("Alıcı, konu ve içerik gereklidir");
@@ -26,10 +31,29 @@ const sendMail = async (req, res, next) => {
       throw new CustomError.BadRequestError("Mail adresiniz tanımlanmamış");
     }
 
-    // Alıcıları kontrol et
-    const recipients = Array.isArray(to) ? to : [to];
-    const ccRecipients = Array.isArray(cc) ? cc : (cc ? [cc] : []);
-    const bccRecipients = Array.isArray(bcc) ? bcc : (bcc ? [bcc] : []);
+    // Parse JSON strings
+    const recipients = Array.isArray(to) ? to : JSON.parse(to);
+    const ccRecipients = cc ? (Array.isArray(cc) ? cc : JSON.parse(cc)) : [];
+    const bccRecipients = bcc ? (Array.isArray(bcc) ? bcc : JSON.parse(bcc)) : [];
+
+    // Prepare attachments
+    const attachmentNames = req.body.attachmentNames ? JSON.parse(req.body.attachmentNames) : [];
+    const attachmentTypes = req.body.attachmentTypes ? JSON.parse(req.body.attachmentTypes) : [];
+    const attachmentUrls = req.body.attachmentUrls ? JSON.parse(req.body.attachmentUrls) : [];
+    
+    console.log("Attachment names:", attachmentNames);
+    console.log("Attachment types:", attachmentTypes);
+    console.log("Attachment URLs:", attachmentUrls);
+    
+    const attachments = files.map((file, index) => ({
+      filename: attachmentNames[index] || file.originalname,
+      data: file.buffer,
+      contentType: attachmentTypes[index] || file.mimetype,
+      size: file.size,
+      url: attachmentUrls[index] || null // Cloudinary URL'sini ekle
+    }));
+    
+    console.log("Final attachments:", attachments.map(att => ({ filename: att.filename, url: att.url })));
 
     // Mail objesi oluştur
     const mailData = {
@@ -71,7 +95,9 @@ const sendMail = async (req, res, next) => {
       mailgunData.bcc = bccRecipients.join(', ');
     }
 
+    console.log("Mailgun data:", mailgunData);
     const mailgunResult = await mailgunService.sendMail(mailgunData);
+    console.log("Mailgun result:", mailgunResult);
 
     if (mailgunResult.success) {
       // Mail durumunu güncelle
@@ -84,6 +110,8 @@ const sendMail = async (req, res, next) => {
       // Kullanıcının mail listesine ekle
       user.mails.push(mail._id);
       await user.save();
+
+      console.log("Mail saved successfully:", mail._id);
 
       res.status(StatusCodes.OK).json({
         success: true,
@@ -328,14 +356,13 @@ const moveToCategory = async (req, res, next) => {
       throw new CustomError.NotFoundError("Mail bulunamadı");
     }
 
-    // Kategoriyi etiket olarak ekle
-    if (!mail.labels.includes(category)) {
-      await mail.addLabel(category);
-    }
+    // Kategoriyi ekle
+    await mail.addCategory(category);
 
     res.status(StatusCodes.OK).json({
       success: true,
       message: `Mail ${category} kategorisine taşındı`,
+      categories: mail.categories,
       labels: mail.labels
     });
   } catch (error) {
@@ -360,14 +387,13 @@ const removeFromCategory = async (req, res, next) => {
       throw new CustomError.NotFoundError("Mail bulunamadı");
     }
 
-    // Kategoriyi etiketten çıkar
-    if (mail.labels.includes(category)) {
-      await mail.removeLabel(category);
-    }
+    // Kategoriyi kaldır
+    await mail.removeCategory(category);
 
     res.status(StatusCodes.OK).json({
       success: true,
       message: `Mail ${category} kategorisinden çıkarıldı`,
+      categories: mail.categories,
       labels: mail.labels
     });
   } catch (error) {
@@ -386,9 +412,18 @@ const getMailsByCategory = async (req, res, next) => {
       throw new CustomError.BadRequestError("Geçersiz kategori");
     }
 
+    // Önce mevcut maillerde categories field'ı yoksa ekle
+    await Mail.updateMany(
+      { 
+        user: new mongoose.Types.ObjectId(userId),
+        categories: { $exists: false }
+      },
+      { $set: { categories: [] } }
+    );
+
     const filter = { 
       user: userId, 
-      labels: { $in: [category] }
+      categories: { $in: [category] }
     };
     
     if (search) {
@@ -430,10 +465,82 @@ const getMailsByCategory = async (req, res, next) => {
   }
 };
 
+// Label kategorisine göre mailleri getir
+const getMailsByLabelCategory = async (req, res, next) => {
+  try {
+    const userId = req.user.userId;
+    const { category, page = 1, limit = 20, search, isRead } = req.query;
+
+    const validCategories = ['social', 'updates', 'forums', 'shopping', 'promotions'];
+    if (!validCategories.includes(category)) {
+      throw new CustomError.BadRequestError("Geçersiz kategori");
+    }
+
+    // Önce mevcut maillerde categories field'ı yoksa ekle
+    await Mail.updateMany(
+      { 
+        user: new mongoose.Types.ObjectId(userId),
+        categories: { $exists: false }
+      },
+      { $set: { categories: [] } }
+    );
+
+    const filter = { 
+      user: userId, 
+      categories: { $in: [category] }
+    };
+    
+    if (search) {
+      filter.$or = [
+        { subject: { $regex: search, $options: 'i' } },
+        { content: { $regex: search, $options: 'i' } },
+        { 'from.name': { $regex: search, $options: 'i' } },
+        { 'from.email': { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    if (isRead !== undefined) {
+      filter.isRead = isRead === 'true';
+    }
+
+    const skip = (page - 1) * limit;
+    const mails = await Mail.find(filter)
+      .sort({ receivedAt: -1, createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit))
+      .populate('user', 'name surname mailAddress');
+
+    const total = await Mail.countDocuments(filter);
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      mails,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // Mail istatistikleri
 const getMailStats = async (req, res, next) => {
   try {
     const userId = req.user.userId;
+
+    
+    // Önce mevcut maillerde categories field'ı yoksa ekle
+    await Mail.updateMany(
+      { 
+        user: new mongoose.Types.ObjectId(userId),
+        categories: { $exists: false }
+      },
+      { $set: { categories: [] } }
+    );
 
     const stats = await Mail.aggregate([
       { $match: { user: new mongoose.Types.ObjectId(userId) } },
@@ -448,33 +555,36 @@ const getMailStats = async (req, res, next) => {
           spam: { $sum: { $cond: [{ $eq: ['$folder', 'spam'] }, 1, 0] } },
           trash: { $sum: { $cond: [{ $eq: ['$folder', 'trash'] }, 1, 0] } },
           archive: { $sum: { $cond: [{ $eq: ['$folder', 'archive'] }, 1, 0] } },
-          // Kategori sayıları
-          social: { $sum: { $cond: [{ $in: ['social', '$labels'] }, 1, 0] } },
-          updates: { $sum: { $cond: [{ $in: ['updates', '$labels'] }, 1, 0] } },
-          forums: { $sum: { $cond: [{ $in: ['forums', '$labels'] }, 1, 0] } },
-          shopping: { $sum: { $cond: [{ $in: ['shopping', '$labels'] }, 1, 0] } },
-          promotions: { $sum: { $cond: [{ $in: ['promotions', '$labels'] }, 1, 0] } }
+          // Kategori sayıları - categories field'ı yoksa boş array kabul et
+          social: { $sum: { $cond: [{ $in: ['social', { $ifNull: ['$categories', []] }] }, 1, 0] } },
+          updates: { $sum: { $cond: [{ $in: ['updates', { $ifNull: ['$categories', []] }] }, 1, 0] } },
+          forums: { $sum: { $cond: [{ $in: ['forums', { $ifNull: ['$categories', []] }] }, 1, 0] } },
+          shopping: { $sum: { $cond: [{ $in: ['shopping', { $ifNull: ['$categories', []] }] }, 1, 0] } },
+          promotions: { $sum: { $cond: [{ $in: ['promotions', { $ifNull: ['$categories', []] }] }, 1, 0] } }
         }
       }
     ]);
 
+    const result = stats[0] || {
+      total: 0,
+      unread: 0,
+      inbox: 0,
+      sent: 0,
+      drafts: 0,
+      spam: 0,
+      trash: 0,
+      archive: 0,
+      social: 0,
+      updates: 0,
+      forums: 0,
+      shopping: 0,
+      promotions: 0
+    };
+    
+    
     res.status(StatusCodes.OK).json({
       success: true,
-      stats: stats[0] || {
-        total: 0,
-        unread: 0,
-        inbox: 0,
-        sent: 0,
-        drafts: 0,
-        spam: 0,
-        trash: 0,
-        archive: 0,
-        social: 0,
-        updates: 0,
-        forums: 0,
-        shopping: 0,
-        promotions: 0
-      }
+      stats: result
     });
   } catch (error) {
     next(error);
@@ -671,7 +781,16 @@ const testWebhook = async (req, res, next) => {
       'body-plain': content || 'Test mail içeriği',
       'body-html': `<p>${content || 'Test mail içeriği'}</p>`,
       timestamp: Math.floor(Date.now() / 1000),
-      'Message-Id': `test-${Date.now()}@${process.env.MAILGUN_DOMAIN || 'gozdedijital.xyz'}`
+      'Message-Id': `test-${Date.now()}@${process.env.MAILGUN_DOMAIN || 'gozdedijital.xyz'}`,
+      'attachment-count': '2',
+      'attachment-1': 'test-document.pdf',
+      'attachment-1-url': 'https://example.com/test-document.pdf',
+      'attachment-1-size': '1024',
+      'attachment-1-content-type': 'application/pdf',
+      'attachment-2': 'test-image.jpg',
+      'attachment-2-url': 'https://example.com/test-image.jpg',
+      'attachment-2-size': '2048',
+      'attachment-2-content-type': 'image/jpeg'
     };
 
     // Webhook handler'ını çağır
@@ -755,6 +874,30 @@ const handleMailgunWebhook = async (req, res, next) => {
       });
     }
 
+    // Attachment'ları parse et
+    const attachments = [];
+    if (webhookData['attachment-count'] && parseInt(webhookData['attachment-count']) > 0) {
+      const attachmentCount = parseInt(webhookData['attachment-count']);
+      for (let i = 1; i <= attachmentCount; i++) {
+        const attachmentName = webhookData[`attachment-${i}`];
+        const attachmentUrl = webhookData[`attachment-${i}-url`];
+        const attachmentSize = webhookData[`attachment-${i}-size`];
+        const attachmentType = webhookData[`attachment-${i}-content-type`];
+        
+        if (attachmentName) {
+          attachments.push({
+            filename: attachmentName,
+            originalName: attachmentName,
+            mimeType: attachmentType || 'application/octet-stream',
+            size: attachmentSize ? parseInt(attachmentSize) : 0,
+            url: attachmentUrl || null
+          });
+        }
+      }
+    }
+
+    console.log('Parsed attachments:', attachments);
+
     // Mail objesi oluştur
     const mailData = {
       from: {
@@ -777,7 +920,9 @@ const handleMailgunWebhook = async (req, res, next) => {
       messageId: messageId,
       mailgunId: messageId,
       user: recipientUser._id,
-      labels: [] // Gelen mailler için boş etiket listesi
+      labels: [], // Gelen mailler için boş etiket listesi
+      categories: [], // Gelen mailler için boş kategori listesi
+      attachments: attachments // Attachment'ları ekle
     };
 
     // Mail'i veritabanına kaydet
@@ -813,6 +958,83 @@ const handleMailgunWebhook = async (req, res, next) => {
   }
 };
 
+// Mark Mail as Important
+const markMailAsImportant = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.userId;
+
+    const mail = await Mail.findOne({ _id: id, user: userId });
+    if (!mail) {
+      throw new CustomError.NotFoundError("Mail bulunamadı");
+    }
+
+    mail.isImportant = !mail.isImportant;
+    await mail.save();
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      message: `Mail ${mail.isImportant ? 'önemli' : 'önemli değil'} olarak işaretlendi`,
+      isImportant: mail.isImportant
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Mark Mail as Starred
+const markMailAsStarred = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.userId;
+
+    const mail = await Mail.findOne({ _id: id, user: userId });
+    if (!mail) {
+      throw new CustomError.NotFoundError("Mail bulunamadı");
+    }
+
+    mail.isStarred = !mail.isStarred;
+    await mail.save();
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      message: `Mail ${mail.isStarred ? 'yıldızlı' : 'yıldızsız'} olarak işaretlendi`,
+      isStarred: mail.isStarred
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Snooze Mail
+const snoozeMail = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { snoozeUntil } = req.body;
+    const userId = req.user.userId;
+
+    if (!snoozeUntil) {
+      throw new CustomError.BadRequestError("Erteleme tarihi gereklidir");
+    }
+
+    const mail = await Mail.findOne({ _id: id, user: userId });
+    if (!mail) {
+      throw new CustomError.NotFoundError("Mail bulunamadı");
+    }
+
+    mail.snoozeUntil = new Date(snoozeUntil);
+    await mail.save();
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      message: "Mail ertelendi",
+      snoozeUntil: mail.snoozeUntil
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   sendMail,
   getInbox,
@@ -824,7 +1046,11 @@ module.exports = {
   moveToCategory,
   removeFromCategory,
   getMailsByCategory,
+  getMailsByLabelCategory,
   getMailStats,
+  markMailAsImportant,
+  markMailAsStarred,
+  snoozeMail,
   checkMailAddress,
   setupMailAddress,
   testMailgunConfig,

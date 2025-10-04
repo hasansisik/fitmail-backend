@@ -1,4 +1,5 @@
 const express = require('express');
+const multer = require('multer');
 const {
   sendMail,
   getInbox,
@@ -10,7 +11,11 @@ const {
   moveToCategory,
   removeFromCategory,
   getMailsByCategory,
+  getMailsByLabelCategory,
   getMailStats,
+  markMailAsImportant,
+  markMailAsStarred,
+  snoozeMail,
   checkMailAddress,
   setupMailAddress,
   testMailgunConfig,
@@ -21,13 +26,23 @@ const {
 } = require('../controllers/mail');
 const { isAuthenticated } = require('../middleware/authMiddleware');
 
+// Multer configuration for file uploads
+const storage = multer.memoryStorage();
+const upload = multer({ 
+  storage: storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+    files: 5 // Maximum 5 files
+  }
+});
+
 const router = express.Router();
 
 // Mailgun webhook - gelen mailleri almak için (authentication yok!)
 router.post('/webhook', express.json(), handleMailgunWebhook);
 
 // Mail gönderme
-router.post('/send', isAuthenticated, sendMail);
+router.post('/send', isAuthenticated, upload.array('attachments', 5), sendMail);
 
 // Gelen kutularını getir
 router.get('/inbox', isAuthenticated, getInbox);
@@ -56,8 +71,20 @@ router.patch('/:id/remove-from-category', isAuthenticated, removeFromCategory);
 // Kategoriye göre mailleri getir
 router.get('/category/:category', isAuthenticated, getMailsByCategory);
 
+// Label kategorisine göre mailleri getir
+router.get('/label-category/:category', isAuthenticated, getMailsByLabelCategory);
+
 // Mail istatistikleri
 router.get('/stats/overview', isAuthenticated, getMailStats);
+
+// Mail'i önemli olarak işaretle
+router.patch('/:id/important', isAuthenticated, markMailAsImportant);
+
+// Mail'i yıldızlı olarak işaretle
+router.patch('/:id/starred', isAuthenticated, markMailAsStarred);
+
+// Mail'i ertele
+router.patch('/:id/snooze', isAuthenticated, snoozeMail);
 
 // Mail adresini kontrol et
 router.post('/check-address', isAuthenticated, checkMailAddress);

@@ -58,10 +58,16 @@ const MailSchema = new mongoose.Schema({
     url: { type: String }
   }],
   
-  // Etiketler
+  // Etiketler (kategoriler)
   labels: [{
     type: String,
-    enum: ['work', 'personal', 'important', 'meeting', 'shopping', 'social', 'updates', 'forums', 'promotions']
+    enum: ['social', 'updates', 'forums', 'shopping', 'promotions', 'work', 'personal', 'important', 'meeting']
+  }],
+  
+  // Kategoriler (etiketlerle aynı ama ayrı tutuyoruz)
+  categories: [{
+    type: String,
+    enum: ['social', 'updates', 'forums', 'shopping', 'promotions']
   }],
   
   // Mail ID'leri
@@ -73,6 +79,7 @@ const MailSchema = new mongoose.Schema({
   sentAt: { type: Date },
   receivedAt: { type: Date },
   readAt: { type: Date },
+  snoozeUntil: { type: Date },
   
   // Kullanıcı referansı
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
@@ -128,6 +135,24 @@ MailSchema.methods.addLabel = function(label) {
 
 MailSchema.methods.removeLabel = function(label) {
   this.labels = this.labels.filter(l => l !== label);
+  return this.save();
+};
+
+MailSchema.methods.addCategory = function(category) {
+  if (!this.categories.includes(category)) {
+    this.categories.push(category);
+  }
+  // Aynı zamanda labels'a da ekle
+  if (!this.labels.includes(category)) {
+    this.labels.push(category);
+  }
+  return this.save();
+};
+
+MailSchema.methods.removeCategory = function(category) {
+  this.categories = this.categories.filter(c => c !== category);
+  // Labels'dan da çıkar
+  this.labels = this.labels.filter(l => l !== category);
   return this.save();
 };
 
