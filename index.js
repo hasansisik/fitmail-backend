@@ -25,6 +25,9 @@ const erorHandlerMiddleware = require('./middleware/eror-handler')
 app.use(cors({
     origin: [
         'http://localhost:3000',
+        'https://fitmail-nextjs.vercel.app',
+        'https://fitmail.vercel.app',
+        'https://fitmail-nextjs.vercel.app',
         'https://gozdedijital.vercel.app',
         'https://gozdedijital-nextjs.vercel.app',
         'https://gozdedijital.xyz',
