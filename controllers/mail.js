@@ -367,7 +367,7 @@ const checkMailAddress = async (req, res, next) => {
     }
 
     // Mail adresinin kullanıcının domain'i ile uyumlu olup olmadığını kontrol et
-    const domain = process.env.MAIL_DOMAIN || 'mailaderim.com';
+    const domain = process.env.MAIL_DOMAIN || 'gozdedijital.xyz';
     if (!email.endsWith(`@${domain}`)) {
       throw new CustomError.BadRequestError(`Mail adresi @${domain} ile bitmelidir`);
     }
@@ -393,6 +393,59 @@ const checkMailAddress = async (req, res, next) => {
   }
 };
 
+// Mail adresini ayarla ve Mailgun route oluştur
+const setupMailAddress = async (req, res, next) => {
+  try {
+    const { email } = req.body;
+    const userId = req.user.userId;
+
+    if (!email) {
+      throw new CustomError.BadRequestError("Mail adresi gereklidir");
+    }
+
+    // Kullanıcıyı bul
+    const user = await User.findById(userId);
+    if (!user) {
+      throw new CustomError.NotFoundError("Kullanıcı bulunamadı");
+    }
+
+    // Mail adresinin domain'ini kontrol et
+    const domain = process.env.MAIL_DOMAIN || 'gozdedijital.xyz';
+    if (!email.endsWith(`@${domain}`)) {
+      throw new CustomError.BadRequestError(`Mail adresi @${domain} ile bitmelidir`);
+    }
+
+    // Mail adresinin daha önce alınıp alınmadığını kontrol et
+    const existingUser = await User.findOne({ mailAddress: email });
+    if (existingUser && existingUser._id.toString() !== userId) {
+      throw new CustomError.BadRequestError("Bu mail adresi zaten kullanılıyor");
+    }
+
+    // Mailgun route oluştur
+    const routeResult = await mailgunService.createMailRoute(email);
+    
+    if (!routeResult.success) {
+      throw new CustomError.BadRequestError(`Mailgun route oluşturulamadı: ${routeResult.error}`);
+    }
+
+    // Kullanıcının mail adresini güncelle
+    user.mailAddress = email;
+    await user.save();
+
+    console.log(`Mail address setup completed for user ${userId}: ${email}`);
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      message: "Mail adresi başarıyla ayarlandı ve Mailgun route oluşturuldu",
+      mailAddress: email,
+      route: routeResult.route,
+      webhookUrl: process.env.WEBHOOK_URL || 'http://localhost:5003/v1/mail/webhook'
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // Mailgun yapılandırmasını test et
 const testMailgunConfig = async (req, res, next) => {
   try {
@@ -409,70 +462,215 @@ const testMailgunConfig = async (req, res, next) => {
   }
 };
 
+// Mailbox oluştur
+const createMailbox = async (req, res, next) => {
+  try {
+    const { email } = req.body;
+    const userId = req.user.userId;
+
+    if (!email) {
+      throw new CustomError.BadRequestError("Mail adresi gereklidir");
+    }
+
+    // Domain kontrolü
+    const domain = process.env.MAIL_DOMAIN || 'gozdedijital.xyz';
+    if (!email.endsWith(`@${domain}`)) {
+      throw new CustomError.BadRequestError(`Mail adresi @${domain} ile bitmelidir`);
+    }
+
+    // Mailbox oluştur
+    const mailboxResult = await mailgunService.createMailbox(email);
+    
+    if (!mailboxResult.success) {
+      throw new CustomError.BadRequestError(`Mailbox oluşturulamadı: ${mailboxResult.error}`);
+    }
+
+    // Kullanıcının mail adresini güncelle
+    const user = await User.findById(userId);
+    if (user) {
+      user.mailAddress = email;
+      await user.save();
+    }
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      message: "Mailbox başarıyla oluşturuldu",
+      mailbox: mailboxResult.mailbox,
+      email: email,
+      password: mailboxResult.password
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Mevcut mailbox'ları listele
+const listMailboxes = async (req, res, next) => {
+  try {
+    const mailboxesResult = await mailgunService.listMailboxes();
+    
+    if (!mailboxesResult.success) {
+      throw new CustomError.BadRequestError(`Mailbox'lar listelenemedi: ${mailboxesResult.error}`);
+    }
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      mailboxes: mailboxesResult.mailboxes,
+      total: mailboxesResult.total
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Webhook test endpoint'i - gelen mail simülasyonu
+const testWebhook = async (req, res, next) => {
+  try {
+    const { recipient, sender, subject, content } = req.body;
+    
+    if (!recipient || !sender || !subject) {
+      throw new CustomError.BadRequestError("Recipient, sender ve subject gereklidir");
+    }
+
+    // Test webhook verisi oluştur
+    const testWebhookData = {
+      recipient: recipient,
+      sender: sender,
+      subject: subject,
+      'body-plain': content || 'Test mail içeriği',
+      'body-html': `<p>${content || 'Test mail içeriği'}</p>`,
+      timestamp: Math.floor(Date.now() / 1000),
+      'Message-Id': `test-${Date.now()}@${process.env.MAILGUN_DOMAIN || 'gozdedijital.xyz'}`
+    };
+
+    // Webhook handler'ını çağır
+    const mockReq = { body: testWebhookData };
+    const mockRes = {
+      status: (code) => ({
+        json: (data) => {
+          console.log('Test webhook response:', data);
+          return data;
+        }
+      })
+    };
+
+    await handleMailgunWebhook(mockReq, mockRes, next);
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      message: 'Test webhook çalıştırıldı',
+      testData: testWebhookData
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // Mailgun webhook handler - gelen mailleri almak için
 const handleMailgunWebhook = async (req, res, next) => {
   try {
-    console.log('Mailgun webhook received:', req.body);
+    console.log('Mailgun webhook received:', JSON.stringify(req.body, null, 2));
     
     const webhookData = req.body;
     
     // Mailgun webhook verisini kontrol et
     if (!webhookData || !webhookData['recipient']) {
-      console.log('Invalid webhook data');
-      return res.status(StatusCodes.OK).json({ message: 'Webhook received' });
+      console.log('Invalid webhook data - missing recipient');
+      return res.status(StatusCodes.OK).json({ message: 'Webhook received but no recipient' });
     }
 
+    // Mailgun webhook verilerini parse et
     const recipient = webhookData['recipient'];
-    const sender = webhookData['sender'] || webhookData['from'];
+    const sender = webhookData['sender'] || webhookData['from'] || 'unknown@example.com';
     const subject = webhookData['subject'] || 'No Subject';
     const bodyPlain = webhookData['body-plain'] || webhookData['stripped-text'] || '';
     const bodyHtml = webhookData['body-html'] || webhookData['stripped-html'] || '';
-    const timestamp = webhookData['timestamp'] || new Date().toISOString();
-    const messageId = webhookData['Message-Id'] || webhookData['message-id'];
+    const timestamp = webhookData['timestamp'] ? parseInt(webhookData['timestamp']) : Date.now() / 1000;
+    const messageId = webhookData['Message-Id'] || webhookData['message-id'] || `mg-${Date.now()}`;
+    
+    // CC ve BCC bilgilerini parse et
+    const cc = webhookData['cc'] ? webhookData['cc'].split(',').map(email => ({
+      email: email.trim(),
+      name: email.trim().split('@')[0]
+    })) : [];
+    
+    const bcc = webhookData['bcc'] ? webhookData['bcc'].split(',').map(email => ({
+      email: email.trim(),
+      name: email.trim().split('@')[0]
+    })) : [];
 
-    console.log('Processing mail:', { recipient, sender, subject });
+    // Gönderen adını parse et
+    const senderName = webhookData['sender'] && webhookData['sender'].includes('<') 
+      ? webhookData['sender'].split('<')[0].trim().replace(/"/g, '')
+      : sender.split('@')[0];
 
-    // Alıcı kullanıcıyı bul
-    const recipientUser = await User.findOne({ email: recipient });
+    console.log('Processing mail:', { 
+      recipient, 
+      sender, 
+      senderName, 
+      subject, 
+      messageId,
+      timestamp: new Date(timestamp * 1000)
+    });
+
+    // Alıcı kullanıcıyı bul - mailAddress alanında ara
+    const recipientUser = await User.findOne({ mailAddress: recipient });
     
     if (!recipientUser) {
-      console.log('Recipient user not found:', recipient);
-      return res.status(StatusCodes.OK).json({ message: 'User not found but webhook accepted' });
+      console.log('Recipient user not found for mail address:', recipient);
+      return res.status(StatusCodes.OK).json({ 
+        message: 'User not found but webhook accepted',
+        recipient: recipient
+      });
     }
 
     // Mail objesi oluştur
     const mailData = {
       from: {
         email: sender,
-        name: sender.split('@')[0]
+        name: senderName
       },
-      to: [{ email: recipient, name: recipient.split('@')[0] }],
+      to: [{ 
+        email: recipient, 
+        name: recipientUser.name || recipient.split('@')[0] 
+      }],
+      cc: cc,
+      bcc: bcc,
       subject,
       content: bodyPlain,
       htmlContent: bodyHtml || bodyPlain,
       folder: 'inbox',
-      status: 'received',
+      status: 'delivered',
       isRead: false,
       receivedAt: new Date(timestamp * 1000), // Unix timestamp to Date
       messageId: messageId,
       mailgunId: messageId,
-      user: recipientUser._id
+      user: recipientUser._id,
+      labels: [] // Gelen mailler için boş etiket listesi
     };
 
     // Mail'i veritabanına kaydet
     const mail = new Mail(mailData);
     await mail.save();
 
-    // Kullanıcının mail listesine ekle
-    recipientUser.mails.push(mail._id);
-    await recipientUser.save();
+    // Kullanıcının mail listesine ekle (eğer mails array'i varsa)
+    if (recipientUser.mails) {
+      recipientUser.mails.push(mail._id);
+      await recipientUser.save();
+    }
 
-    console.log('Mail saved successfully:', mail._id);
+    console.log('Mail saved successfully:', {
+      mailId: mail._id,
+      recipient: recipient,
+      subject: subject,
+      receivedAt: mail.receivedAt
+    });
 
     res.status(StatusCodes.OK).json({
       success: true,
       message: 'Mail received and saved',
-      mailId: mail._id
+      mailId: mail._id,
+      recipient: recipient
     });
   } catch (error) {
     console.error('Webhook error:', error);
@@ -494,6 +692,10 @@ module.exports = {
   manageLabels,
   getMailStats,
   checkMailAddress,
+  setupMailAddress,
   testMailgunConfig,
+  createMailbox,
+  listMailboxes,
+  testWebhook,
   handleMailgunWebhook
 };

@@ -71,6 +71,7 @@ const MailSchema = new mongoose.Schema({
   
   // Zaman damgaları
   sentAt: { type: Date },
+  receivedAt: { type: Date },
   readAt: { type: Date },
   
   // Kullanıcı referansı

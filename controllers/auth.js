@@ -77,9 +77,17 @@ const register = async (req, res, next) => {
     profile.user = user._id;
     await Promise.all([auth.save(), profile.save()]);
 
-    // Mailgun'da mail route oluştur ve hoşgeldin maili gönder
+    // Mailgun'da mailbox ve route oluştur, hoşgeldin maili gönder
     try {
-      // Mail route oluştur
+      // 1. Önce mailbox oluştur (mail adresini aktif et)
+      const mailboxResult = await mailgunService.createMailbox(email);
+      if (mailboxResult.success) {
+        console.log('Mailgun mailbox created for:', email);
+      } else {
+        console.warn('Failed to create Mailgun mailbox:', mailboxResult.error);
+      }
+
+      // 2. Route oluştur (webhook yönlendirmesi)
       const routeResult = await mailgunService.createMailRoute(email);
       if (routeResult.success) {
         console.log('Mailgun route created for:', email);
@@ -87,7 +95,7 @@ const register = async (req, res, next) => {
         console.warn('Failed to create Mailgun route:', routeResult.error);
       }
 
-      // Hoşgeldin maili gönder
+      // 3. Hoşgeldin maili gönder
       const welcomeEmailResult = await mailgunService.sendWelcomeEmail(email, name);
       if (welcomeEmailResult.success) {
         console.log('Welcome email sent to:', email);
@@ -900,6 +908,28 @@ const googleAuth = async (req, res, next) => {
       auth.user = user._id;
       profile.user = user._id;
       await Promise.all([auth.save(), profile.save()]);
+
+      // Mailgun'da mailbox ve route oluştur (Google kullanıcıları için)
+      try {
+        // 1. Önce mailbox oluştur (mail adresini aktif et)
+        const mailboxResult = await mailgunService.createMailbox(email);
+        if (mailboxResult.success) {
+          console.log('Mailgun mailbox created for Google user:', email);
+        } else {
+          console.warn('Failed to create Mailgun mailbox for Google user:', mailboxResult.error);
+        }
+
+        // 2. Route oluştur (webhook yönlendirmesi)
+        const routeResult = await mailgunService.createMailRoute(email);
+        if (routeResult.success) {
+          console.log('Mailgun route created for Google user:', email);
+        } else {
+          console.warn('Failed to create Mailgun route for Google user:', routeResult.error);
+        }
+      } catch (mailgunError) {
+        // Mailgun hatalarını logla ama kayıt işlemini engelleme
+        console.error('Mailgun error during Google registration:', mailgunError);
+      }
     } else {
       // Check if existing user is inactive
       if (user.status === 'inactive') {
@@ -1088,6 +1118,28 @@ const googleRegister = async (req, res, next) => {
     auth.user = user._id;
     profile.user = user._id;
     await Promise.all([auth.save(), profile.save()]);
+
+    // Mailgun'da mailbox ve route oluştur (Google Register için)
+    try {
+      // 1. Önce mailbox oluştur (mail adresini aktif et)
+      const mailboxResult = await mailgunService.createMailbox(email);
+      if (mailboxResult.success) {
+        console.log('Mailgun mailbox created for Google register:', email);
+      } else {
+        console.warn('Failed to create Mailgun mailbox for Google register:', mailboxResult.error);
+      }
+
+      // 2. Route oluştur (webhook yönlendirmesi)
+      const routeResult = await mailgunService.createMailRoute(email);
+      if (routeResult.success) {
+        console.log('Mailgun route created for Google register:', email);
+      } else {
+        console.warn('Failed to create Mailgun route for Google register:', routeResult.error);
+      }
+    } catch (mailgunError) {
+      // Mailgun hatalarını logla ama kayıt işlemini engelleme
+      console.error('Mailgun error during Google register:', mailgunError);
+    }
 
     const accessToken = await generateToken(
       { userId: user._id, role: user.role },

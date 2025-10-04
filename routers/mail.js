@@ -9,7 +9,11 @@ const {
   manageLabels,
   getMailStats,
   checkMailAddress,
+  setupMailAddress,
   testMailgunConfig,
+  createMailbox,
+  listMailboxes,
+  testWebhook,
   handleMailgunWebhook
 } = require('../controllers/mail');
 const { isAuthenticated } = require('../middleware/authMiddleware');
@@ -46,7 +50,19 @@ router.get('/stats/overview', isAuthenticated, getMailStats);
 // Mail adresini kontrol et
 router.post('/check-address', isAuthenticated, checkMailAddress);
 
+// Mail adresini ayarla ve Mailgun route oluştur
+router.post('/setup-address', isAuthenticated, setupMailAddress);
+
 // Mailgun yapılandırmasını test et
 router.get('/test-config', isAuthenticated, testMailgunConfig);
+
+// Mailbox oluştur
+router.post('/create-mailbox', isAuthenticated, createMailbox);
+
+// Mevcut mailbox'ları listele
+router.get('/list-mailboxes', isAuthenticated, listMailboxes);
+
+// Webhook test endpoint'i
+router.post('/test-webhook', isAuthenticated, testWebhook);
 
 module.exports = router;
