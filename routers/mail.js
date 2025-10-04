@@ -62,7 +62,7 @@ router.post('/create-mailbox', isAuthenticated, createMailbox);
 // Mevcut mailbox'ları listele
 router.get('/list-mailboxes', isAuthenticated, listMailboxes);
 
-// Webhook test endpoint'i
-router.post('/test-webhook', isAuthenticated, testWebhook);
+// Webhook test endpoint'i (authentication yok - test için)
+router.post('/test-webhook', express.json(), testWebhook);
 
 module.exports = router;

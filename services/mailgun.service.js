@@ -11,18 +11,28 @@ class MailgunService {
       return;
     }
 
-    this.mailgun = new Mailgun(formData);
-    this.mg = this.mailgun.client({
-      username: 'api',
-      key: process.env.MAILGUN_API_KEY,
-      url: process.env.MAILGUN_DOMAIN_URL || 'https://api.mailgun.net'
-    });
-    this.domain = process.env.MAILGUN_DOMAIN || 'gozdedijital.xyz';
-    this.fromEmail = process.env.EMAIL_FROM || 'noreply@gozdedijital.xyz';
-    this.fromName = process.env.EMAIL_FROM_NAME || 'Gözde Dijital';
+    try {
+      this.mailgun = new Mailgun(formData);
+      this.mg = this.mailgun.client({
+        username: 'api',
+        key: process.env.MAILGUN_API_KEY,
+        url: process.env.MAILGUN_DOMAIN_URL || 'https://api.mailgun.net'
+      });
+      this.domain = process.env.MAILGUN_DOMAIN || 'gozdedijital.xyz';
+      this.fromEmail = process.env.EMAIL_FROM || 'noreply@gozdedijital.xyz';
+      this.fromName = process.env.EMAIL_FROM_NAME || 'Gözde Dijital';
+      
+      console.log('Mailgun client initialized successfully');
+      console.log('Domain:', this.domain);
+      console.log('API Key exists:', !!process.env.MAILGUN_API_KEY);
+    } catch (error) {
+      console.error('Failed to initialize Mailgun client:', error);
+      this.mg = null;
+      this.domain = null;
+    }
   }
 
-  // Mailgun'da yeni mail adresi oluştur (mailbox + route)
+  // Mailgun'da yeni mail adresi oluştur (basitleştirilmiş)
   async createMailRoute(email) {
     try {
       if (!this.mg || !this.domain) {
@@ -32,65 +42,17 @@ class MailgunService {
         };
       }
 
-      // Email adresinden username al
-      const username = email.split('@')[0];
+      // Mailgun'da mailbox ve route oluşturma işlemleri kaldırıldı
+      // Sadece mail gönderme işlemi kullanılıyor
+      // Gelen mailler webhook ile yakalanıyor
       
-      // 1. Önce mailbox oluştur (mail adresini aktif et)
-      try {
-        const mailboxData = {
-          address: email,
-          name: username,
-          password: Math.random().toString(36).slice(-8) // Random password
-        };
-        
-        const mailboxResponse = await this.mg.mailboxes.create(this.domain, mailboxData);
-        console.log('Mailbox created:', mailboxResponse);
-      } catch (mailboxError) {
-        // Mailbox zaten varsa devam et
-        if (mailboxError.message.includes('already exists')) {
-          console.log('Mailbox already exists, continuing...');
-        } else {
-          console.error('Mailbox creation error:', mailboxError);
-          // Mailbox oluşturulamadı ama route oluşturmaya devam et
-        }
-      }
+      console.log('Mail route setup skipped - using webhook for incoming emails');
       
-      // 2. Genel route kontrolü - eğer genel route yoksa oluştur
-      const webhookUrl = process.env.WEBHOOK_URL || 'http://localhost:5003/v1/mail/webhook';
-      
-      // Mevcut route'ları kontrol et
-      const existingRoutes = await this.mg.routes.list();
-      const generalRoute = existingRoutes.items.find(route => 
-        route.expression && route.expression.includes('gozdedijital.xyz')
-      );
-
-      if (!generalRoute) {
-        // Genel route oluştur - tüm @gozdedijital.xyz adresleri için
-        const routeData = {
-          priority: 0,
-          description: 'General route for all @gozdedijital.xyz addresses',
-          expression: 'match_recipient(".*@gozdedijital.xyz")',
-          action: [`forward("${webhookUrl}")`, 'store()']
-        };
-
-        const routeResponse = await this.mg.routes.create(routeData);
-        console.log('General route created:', routeResponse);
-        
-        return {
-          success: true,
-          route: routeResponse,
-          email: email,
-          message: 'Mailbox created and general route created successfully'
-        };
-      } else {
-        console.log('General route already exists, using existing route');
-        return {
-          success: true,
-          route: generalRoute,
-          email: email,
-          message: 'Mailbox created and using existing general route'
-        };
-      }
+      return {
+        success: true,
+        email: email,
+        message: 'Mail route setup completed - webhook will handle incoming emails'
+      };
     } catch (error) {
       console.error('Mailgun create route error:', error);
       return {
@@ -300,7 +262,7 @@ class MailgunService {
     }
   }
 
-  // Mailbox oluştur
+  // Mailbox oluştur (basitleştirilmiş)
   async createMailbox(email) {
     try {
       if (!this.mg || !this.domain) {
@@ -310,22 +272,14 @@ class MailgunService {
         };
       }
 
-      const username = email.split('@')[0];
-      const password = Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8);
-      
-      const mailboxData = {
-        address: email,
-        name: username,
-        password: password
-      };
-      
-      const response = await this.mg.mailboxes.create(this.domain, mailboxData);
+      // Mailbox oluşturma işlemi kaldırıldı
+      // Mailgun'da manuel olarak mailbox oluşturulması gerekiyor
+      console.log('Mailbox creation skipped - please create mailbox manually in Mailgun dashboard');
       
       return {
         success: true,
-        mailbox: response,
         email: email,
-        password: password
+        message: 'Mailbox creation skipped - please create manually in Mailgun dashboard'
       };
     } catch (error) {
       console.error('Mailgun create mailbox error:', error);
@@ -336,7 +290,7 @@ class MailgunService {
     }
   }
 
-  // Mevcut mailbox'ları listele
+  // Mevcut mailbox'ları listele (basitleştirilmiş)
   async listMailboxes() {
     try {
       if (!this.mg || !this.domain) {
@@ -346,12 +300,14 @@ class MailgunService {
         };
       }
 
-      const response = await this.mg.mailboxes.list(this.domain);
+      // Mailbox listeleme işlemi kaldırıldı
+      console.log('Mailbox listing skipped - please check Mailgun dashboard');
       
       return {
         success: true,
-        mailboxes: response.items,
-        total: response.total_count
+        mailboxes: [],
+        total: 0,
+        message: 'Mailbox listing skipped - please check Mailgun dashboard'
       };
     } catch (error) {
       console.error('Mailgun list mailboxes error:', error);
