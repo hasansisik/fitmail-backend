@@ -311,6 +311,125 @@ const manageLabels = async (req, res, next) => {
   }
 };
 
+// Mail'i kategoriye taşı
+const moveToCategory = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { category } = req.body;
+    const userId = req.user.userId;
+
+    const validCategories = ['social', 'updates', 'forums', 'shopping', 'promotions'];
+    if (!validCategories.includes(category)) {
+      throw new CustomError.BadRequestError("Geçersiz kategori");
+    }
+
+    const mail = await Mail.findOne({ _id: id, user: userId });
+    if (!mail) {
+      throw new CustomError.NotFoundError("Mail bulunamadı");
+    }
+
+    // Kategoriyi etiket olarak ekle
+    if (!mail.labels.includes(category)) {
+      await mail.addLabel(category);
+    }
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      message: `Mail ${category} kategorisine taşındı`,
+      labels: mail.labels
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Mail'den kategoriyi kaldır
+const removeFromCategory = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { category } = req.body;
+    const userId = req.user.userId;
+
+    const validCategories = ['social', 'updates', 'forums', 'shopping', 'promotions'];
+    if (!validCategories.includes(category)) {
+      throw new CustomError.BadRequestError("Geçersiz kategori");
+    }
+
+    const mail = await Mail.findOne({ _id: id, user: userId });
+    if (!mail) {
+      throw new CustomError.NotFoundError("Mail bulunamadı");
+    }
+
+    // Kategoriyi etiketten çıkar
+    if (mail.labels.includes(category)) {
+      await mail.removeLabel(category);
+    }
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      message: `Mail ${category} kategorisinden çıkarıldı`,
+      labels: mail.labels
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Kategoriye göre mailleri getir
+const getMailsByCategory = async (req, res, next) => {
+  try {
+    const userId = req.user.userId;
+    const { category, page = 1, limit = 20, search, isRead } = req.query;
+
+    const validCategories = ['social', 'updates', 'forums', 'shopping', 'promotions'];
+    if (!validCategories.includes(category)) {
+      throw new CustomError.BadRequestError("Geçersiz kategori");
+    }
+
+    const filter = { 
+      user: userId, 
+      labels: { $in: [category] }
+    };
+    
+    if (search) {
+      filter.$or = [
+        { subject: { $regex: search, $options: 'i' } },
+        { content: { $regex: search, $options: 'i' } },
+        { 'from.name': { $regex: search, $options: 'i' } },
+        { 'from.email': { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    if (isRead !== undefined) {
+      filter.isRead = isRead === 'true';
+    }
+
+    const skip = (page - 1) * limit;
+    
+    const mails = await Mail.find(filter)
+      .populate('user', 'name surname mailAddress')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    const total = await Mail.countDocuments(filter);
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      mails,
+      category,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(total / limit),
+        totalItems: total,
+        itemsPerPage: parseInt(limit)
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // Mail istatistikleri
 const getMailStats = async (req, res, next) => {
   try {
@@ -328,7 +447,13 @@ const getMailStats = async (req, res, next) => {
           drafts: { $sum: { $cond: [{ $eq: ['$folder', 'drafts'] }, 1, 0] } },
           spam: { $sum: { $cond: [{ $eq: ['$folder', 'spam'] }, 1, 0] } },
           trash: { $sum: { $cond: [{ $eq: ['$folder', 'trash'] }, 1, 0] } },
-          archive: { $sum: { $cond: [{ $eq: ['$folder', 'archive'] }, 1, 0] } }
+          archive: { $sum: { $cond: [{ $eq: ['$folder', 'archive'] }, 1, 0] } },
+          // Kategori sayıları
+          social: { $sum: { $cond: [{ $in: ['social', '$labels'] }, 1, 0] } },
+          updates: { $sum: { $cond: [{ $in: ['updates', '$labels'] }, 1, 0] } },
+          forums: { $sum: { $cond: [{ $in: ['forums', '$labels'] }, 1, 0] } },
+          shopping: { $sum: { $cond: [{ $in: ['shopping', '$labels'] }, 1, 0] } },
+          promotions: { $sum: { $cond: [{ $in: ['promotions', '$labels'] }, 1, 0] } }
         }
       }
     ]);
@@ -343,7 +468,12 @@ const getMailStats = async (req, res, next) => {
         drafts: 0,
         spam: 0,
         trash: 0,
-        archive: 0
+        archive: 0,
+        social: 0,
+        updates: 0,
+        forums: 0,
+        shopping: 0,
+        promotions: 0
       }
     });
   } catch (error) {
@@ -691,6 +821,9 @@ module.exports = {
   moveToFolder,
   deleteMail,
   manageLabels,
+  moveToCategory,
+  removeFromCategory,
+  getMailsByCategory,
   getMailStats,
   checkMailAddress,
   setupMailAddress,

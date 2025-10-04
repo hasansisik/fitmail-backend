@@ -7,6 +7,9 @@ const {
   moveToFolder,
   deleteMail,
   manageLabels,
+  moveToCategory,
+  removeFromCategory,
+  getMailsByCategory,
   getMailStats,
   checkMailAddress,
   setupMailAddress,
@@ -43,6 +46,15 @@ router.delete('/:id', isAuthenticated, deleteMail);
 
 // Mail'e etiket ekle/çıkar
 router.patch('/:id/labels', isAuthenticated, manageLabels);
+
+// Mail'i kategoriye taşı
+router.patch('/:id/move-to-category', isAuthenticated, moveToCategory);
+
+// Mail'den kategoriyi kaldır
+router.patch('/:id/remove-from-category', isAuthenticated, removeFromCategory);
+
+// Kategoriye göre mailleri getir
+router.get('/category/:category', isAuthenticated, getMailsByCategory);
 
 // Mail istatistikleri
 router.get('/stats/overview', isAuthenticated, getMailStats);
