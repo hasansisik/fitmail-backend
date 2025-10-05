@@ -20,7 +20,7 @@ class MailgunService {
       });
       this.domain = process.env.MAILGUN_DOMAIN || 'gozdedijital.xyz';
       this.fromEmail = process.env.EMAIL_FROM || 'noreply@gozdedijital.xyz';
-      this.fromName = process.env.EMAIL_FROM_NAME || 'Gözde Dijital';
+      this.fromName = process.env.EMAIL_FROM_NAME || 'Fitmail';
       
       console.log('Mailgun client initialized successfully');
       console.log('Domain:', this.domain);
@@ -75,7 +75,7 @@ class MailgunService {
       const messageData = {
         from: `${this.fromName} <${this.fromEmail}>`,
         to: email,
-        subject: 'Gözde Dijital\'e Hoş Geldiniz! 🎉',
+        subject: 'Fitmail\'e Hoş Geldiniz! 🎉',
         html: `
           <!DOCTYPE html>
           <html>
@@ -96,7 +96,7 @@ class MailgunService {
               </div>
               <div class="content">
                 <h2>Merhaba ${name}!</h2>
-                <p>Gözde Dijital ailesine katıldığınız için çok mutluyuz! 🚀</p>
+                <p>Fitmail ailesine katıldığınız için çok mutluyuz! 🚀</p>
                 <p>Mail adresiniz: <strong>${email}</strong></p>
                 <p>Artık güvenli ve hızlı mail sisteminizi kullanmaya başlayabilirsiniz.</p>
                 <div style="text-align: center;">
@@ -112,13 +112,13 @@ class MailgunService {
               </div>
               <div class="footer">
                 <p>Bu mail ${this.fromEmail} adresinden gönderilmiştir.</p>
-                <p>&copy; 2025 Gözde Dijital. Tüm hakları saklıdır.</p>
+                <p>&copy; 2025 Fitmail. Tüm hakları saklıdır.</p>
               </div>
             </div>
           </body>
           </html>
         `,
-        text: `Merhaba ${name}!\n\nGözde Dijital ailesine katıldığınız için çok mutluyuz!\n\nMail adresiniz: ${email}\n\nArtık güvenli ve hızlı mail sisteminizi kullanmaya başlayabilirsiniz.`
+        text: `Merhaba ${name}!\n\nFitmail ailesine katıldığınız için çok mutluyuz!\n\nMail adresiniz: ${email}\n\nArtık güvenli ve hızlı mail sisteminizi kullanmaya başlayabilirsiniz.`
       };
 
       const response = await this.mg.messages.create(this.domain, messageData);
