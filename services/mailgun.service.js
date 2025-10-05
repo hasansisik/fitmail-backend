@@ -155,7 +155,8 @@ class MailgunService {
         subject: subject,
         text: text,
         html: html,
-        'h:Reply-To': from
+        'h:Reply-To': from, // Reply-To header'ı gönderen adresine ayarla
+        'h:Return-Path': from // Return-Path header'ı da ekle
       };
 
       // Ekler varsa ekle

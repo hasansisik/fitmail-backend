@@ -9,7 +9,7 @@ const sendVerificationEmail = async ({
 
   return sendEmail({
     to: email,
-    subject: 'promind360 Mail Doğrulama',
+    subject: 'fitmail Mail Doğrulama',
     html: `<h4> Merhaba, ${name}</h4>
     ${message}
     `,

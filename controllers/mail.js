@@ -191,32 +191,6 @@ const getInbox = async (req, res, next) => {
   }
 };
 
-// Mail detayını getir
-const getMailById = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    const userId = req.user.userId;
-
-    const mail = await Mail.findOne({ _id: id, user: userId })
-      .populate('user', 'name surname mailAddress');
-
-    if (!mail) {
-      throw new CustomError.NotFoundError("Mail bulunamadı");
-    }
-
-    // Okunmamışsa okundu olarak işaretle
-    if (!mail.isRead) {
-      await mail.markAsRead();
-    }
-
-    res.status(StatusCodes.OK).json({
-      success: true,
-      mail
-    });
-  } catch (error) {
-    next(error);
-  }
-};
 
 // Mail'i okundu/okunmadı olarak işaretle
 const toggleReadStatus = async (req, res, next) => {
@@ -764,6 +738,31 @@ const listMailboxes = async (req, res, next) => {
   }
 };
 
+// Get Mail by ID
+const getMailById = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.userId;
+
+    const mail = await Mail.findOne({ _id: id, user: userId });
+    if (!mail) {
+      throw new CustomError.NotFoundError("Mail bulunamadı");
+    }
+
+    // Okunmamışsa okundu olarak işaretle
+    if (!mail.isRead) {
+      await mail.markAsRead();
+    }
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      mail
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // Webhook test endpoint'i - gelen mail simülasyonu
 const testWebhook = async (req, res, next) => {
   try {
@@ -819,7 +818,10 @@ const testWebhook = async (req, res, next) => {
 // Mailgun webhook handler - gelen mailleri almak için
 const handleMailgunWebhook = async (req, res, next) => {
   try {
-    console.log('Mailgun webhook received:', JSON.stringify(req.body, null, 2));
+    console.log('=== MAILGUN WEBHOOK RECEIVED ===');
+    console.log('Headers:', JSON.stringify(req.headers, null, 2));
+    console.log('Body:', JSON.stringify(req.body, null, 2));
+    console.log('================================');
     
     const webhookData = req.body;
     
@@ -860,7 +862,9 @@ const handleMailgunWebhook = async (req, res, next) => {
       senderName, 
       subject, 
       messageId,
-      timestamp: new Date(timestamp * 1000)
+      timestamp: new Date(timestamp * 1000),
+      isReply: subject.toLowerCase().startsWith('re:'),
+      isGmail: sender.includes('@gmail.com')
     });
 
     // Alıcı kullanıcıyı bul - mailAddress alanında ara

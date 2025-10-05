@@ -101,6 +101,9 @@ router.post('/create-mailbox', isAuthenticated, createMailbox);
 // Mevcut mailbox'ları listele
 router.get('/list-mailboxes', isAuthenticated, listMailboxes);
 
+// Get mail by ID
+router.get('/:id', isAuthenticated, getMailById);
+
 // Webhook test endpoint'i (authentication yok - test için)
 router.post('/test-webhook', express.json(), testWebhook);
 
