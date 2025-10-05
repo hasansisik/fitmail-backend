@@ -80,13 +80,23 @@ const MailSchema = new mongoose.Schema({
   receivedAt: { type: Date },
   readAt: { type: Date },
   snoozeUntil: { type: Date },
+  deletedAt: { type: Date }, // Çöp kutusuna atılma tarihi
   
   // Kullanıcı referansı
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   
   // Mailgun bilgileri
   mailgunId: { type: String },
-  mailgunResponse: { type: mongoose.Schema.Types.Mixed }
+  mailgunResponse: { type: mongoose.Schema.Types.Mixed },
+  
+  // Konuşma geçmişi (cevaplar)
+  conversation: [{
+    id: { type: String, required: true },
+    sender: { type: String, required: true },
+    content: { type: String, required: true },
+    date: { type: Date, default: Date.now },
+    isFromMe: { type: Boolean, default: false }
+  }]
 }, { timestamps: true });
 
 // Index'ler
@@ -153,6 +163,20 @@ MailSchema.methods.removeCategory = function(category) {
   this.categories = this.categories.filter(c => c !== category);
   // Labels'dan da çıkar
   this.labels = this.labels.filter(l => l !== category);
+  return this.save();
+};
+
+MailSchema.methods.addReply = function(replyData) {
+  const reply = {
+    id: new mongoose.Types.ObjectId().toString(),
+    sender: replyData.sender,
+    content: replyData.content,
+    date: new Date(),
+    isFromMe: replyData.isFromMe || false
+  };
+  
+  this.conversation = this.conversation || [];
+  this.conversation.push(reply);
   return this.save();
 };
 

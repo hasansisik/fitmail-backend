@@ -68,7 +68,7 @@ const sendMail = async (req, res, next) => {
       content,
       htmlContent: htmlContent || content,
       folder: 'sent',
-      status: 'draft',
+      status: 'draft', // Draft olarak başla, gönderim başarılı olursa 'sent' olacak
       labels: labels || [],
       attachments: attachments || [],
       user: userId
@@ -77,6 +77,9 @@ const sendMail = async (req, res, next) => {
     // Mail'i veritabanına kaydet
     const mail = new Mail(mailData);
     await mail.save();
+    console.log("Mail saved to database with ID:", mail._id);
+    console.log("Mail folder:", mail.folder);
+    console.log("Mail status:", mail.status);
 
     // Mailgun ile gönder
     const mailgunData = {
@@ -106,12 +109,16 @@ const sendMail = async (req, res, next) => {
       mail.mailgunId = mailgunResult.messageId;
       mail.mailgunResponse = mailgunResult.response;
       await mail.save();
+      console.log("Mail status updated to 'sent' for ID:", mail._id);
 
       // Kullanıcının mail listesine ekle
       user.mails.push(mail._id);
       await user.save();
+      console.log("Mail added to user's mail list. User ID:", userId);
 
-      console.log("Mail saved successfully:", mail._id);
+      console.log("Mail sent successfully:", mail._id);
+      console.log("Final mail folder:", mail.folder);
+      console.log("Final mail status:", mail.status);
 
       res.status(StatusCodes.OK).json({
         success: true,
@@ -121,6 +128,7 @@ const sendMail = async (req, res, next) => {
           subject: mail.subject,
           to: mail.to,
           status: mail.status,
+          folder: mail.folder,
           sentAt: mail.sentAt
         }
       });
@@ -267,10 +275,14 @@ const deleteMail = async (req, res, next) => {
         message: "Mail kalıcı olarak silindi"
       });
     } else {
-      await mail.moveToFolder('trash');
+      // Mail'i çöp kutusuna taşı ve silme tarihini ekle
+      mail.folder = 'trash';
+      mail.deletedAt = new Date(); // Silme tarihini kaydet
+      await mail.save();
+      
       res.json({
         success: true,
-        message: "Mail çöp kutusuna taşındı"
+        message: "Mail çöp kutusuna taşındı. 30 gün sonra otomatik olarak silinecek."
       });
     }
   } catch (error) {
@@ -1040,6 +1052,107 @@ const snoozeMail = async (req, res, next) => {
   }
 };
 
+
+// Otomatik çöp kutusu temizleme - 30 gün önce silinen mailleri kalıcı olarak sil
+const cleanupTrashMails = async () => {
+  try {
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    
+    console.log('Cleaning up trash mails older than:', thirtyDaysAgo);
+    
+    const result = await Mail.deleteMany({
+      folder: 'trash',
+      deletedAt: { $lt: thirtyDaysAgo }
+    });
+    
+    console.log(`Cleaned up ${result.deletedCount} old trash mails`);
+    return result.deletedCount;
+  } catch (error) {
+    console.error('Error cleaning up trash mails:', error);
+    return 0;
+  }
+};
+
+// Manuel çöp kutusu temizleme endpoint'i
+const manualCleanupTrash = async (req, res, next) => {
+  try {
+    const deletedCount = await cleanupTrashMails();
+    
+    res.status(StatusCodes.OK).json({
+      success: true,
+      message: `${deletedCount} eski mail çöp kutusundan temizlendi`,
+      deletedCount
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Add Reply to Mail
+const addReplyToMail = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { content, replyTo } = req.body;
+    const userId = req.user.userId;
+
+    if (!content) {
+      throw new CustomError.BadRequestError("Cevap içeriği gereklidir");
+    }
+
+    // Orijinal maili bul
+    const originalMail = await Mail.findOne({ _id: replyTo || id, user: userId });
+    if (!originalMail) {
+      throw new CustomError.NotFoundError("Orijinal mail bulunamadı");
+    }
+
+    // Kullanıcı bilgilerini al
+    const user = await User.findById(userId);
+    if (!user) {
+      throw new CustomError.NotFoundError("Kullanıcı bulunamadı");
+    }
+
+    // Cevabı orijinal maile ekle
+    const replyData = {
+      sender: `${user.name} ${user.surname}`,
+      content: content,
+      isFromMe: true
+    };
+
+    await originalMail.addReply(replyData);
+
+    // Mailgun ile cevabı gönder
+    const mailgunData = {
+      from: `${user.name} ${user.surname} <${user.mailAddress}>`,
+      to: originalMail.from.email,
+      subject: originalMail.subject.startsWith('Re:') ? originalMail.subject : `Re: ${originalMail.subject}`,
+      text: content,
+      html: content.replace(/\n/g, '<br>')
+    };
+
+    const mailgunResult = await mailgunService.sendMail(mailgunData);
+    
+    if (mailgunResult.success) {
+      res.status(StatusCodes.OK).json({
+        success: true,
+        message: "Cevap başarıyla gönderildi ve mail'e eklendi",
+        mail: originalMail,
+        mailgunResult: mailgunResult
+      });
+    } else {
+      // Mailgun hatası olsa bile cevap mail'e eklendi
+      res.status(StatusCodes.OK).json({
+        success: true,
+        message: "Cevap mail'e eklendi ancak gönderimde hata oluştu",
+        mail: originalMail,
+        mailgunError: mailgunResult.error
+      });
+    }
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   sendMail,
   getInbox,
@@ -1056,11 +1169,14 @@ module.exports = {
   markMailAsImportant,
   markMailAsStarred,
   snoozeMail,
+  addReplyToMail,
   checkMailAddress,
   setupMailAddress,
   testMailgunConfig,
   createMailbox,
   listMailboxes,
   testWebhook,
-  handleMailgunWebhook
+  handleMailgunWebhook,
+  cleanupTrashMails,
+  manualCleanupTrash
 };

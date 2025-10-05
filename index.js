@@ -18,6 +18,9 @@ const connectDB = require('./config/connectDB');
 const authRouter = require('./routers/auth');
 const mailRouter = require('./routers/mail');
 
+//controllers
+const { cleanupTrashMails } = require('./controllers/mail');
+
 //midlleware
 const notFoundMiddleware = require('./middleware/not-found')
 const erorHandlerMiddleware = require('./middleware/eror-handler')
@@ -95,6 +98,30 @@ const start = async () => {
         app.listen(port,
             console.log(`MongoDb Connection Successful,App started on port ${port} : ${process.env.NODE_ENV}`),
         );
+        
+        // Otomatik çöp kutusu temizleme - her gün saat 02:00'da çalışır
+        setInterval(async () => {
+            try {
+                console.log('Running automatic trash cleanup...');
+                const deletedCount = await cleanupTrashMails();
+                if (deletedCount > 0) {
+                    console.log(`Automatic cleanup completed: ${deletedCount} mails deleted`);
+                }
+            } catch (error) {
+                console.error('Automatic cleanup failed:', error);
+            }
+        }, 24 * 60 * 60 * 1000); // 24 saat
+        
+        // İlk temizleme işlemini hemen çalıştır (opsiyonel)
+        setTimeout(async () => {
+            try {
+                console.log('Running initial trash cleanup...');
+                await cleanupTrashMails();
+            } catch (error) {
+                console.error('Initial cleanup failed:', error);
+            }
+        }, 5000); // 5 saniye sonra
+        
     } catch (error) {
         console.log(error);
     }

@@ -16,13 +16,16 @@ const {
   markMailAsImportant,
   markMailAsStarred,
   snoozeMail,
+  addReplyToMail,
   checkMailAddress,
   setupMailAddress,
   testMailgunConfig,
   createMailbox,
   listMailboxes,
   testWebhook,
-  handleMailgunWebhook
+  handleMailgunWebhook,
+  cleanupTrashMails,
+  manualCleanupTrash
 } = require('../controllers/mail');
 const { isAuthenticated } = require('../middleware/authMiddleware');
 
@@ -86,6 +89,9 @@ router.patch('/:id/starred', isAuthenticated, markMailAsStarred);
 // Mail'i ertele
 router.patch('/:id/snooze', isAuthenticated, snoozeMail);
 
+// Mail'e cevap ekle
+router.post('/:id/reply', isAuthenticated, addReplyToMail);
+
 // Mail adresini kontrol et
 router.post('/check-address', isAuthenticated, checkMailAddress);
 
@@ -106,5 +112,8 @@ router.get('/:id', isAuthenticated, getMailById);
 
 // Webhook test endpoint'i (authentication yok - test için)
 router.post('/test-webhook', express.json(), testWebhook);
+
+// Çöp kutusu temizleme endpoint'i
+router.post('/cleanup-trash', isAuthenticated, manualCleanupTrash);
 
 module.exports = router;
