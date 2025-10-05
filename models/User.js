@@ -48,7 +48,7 @@ const ProfileSchema = new mongoose.Schema({
   },
   picture: {
     type: String,
-    default: "https://res.cloudinary.com/da2qwsrbv/image/upload/v1757687384/sj3lcvvd7mjuuwpzann8.png",
+    default: "https://res-console.cloudinary.com/da2qwsrbv/thumbnails/v1/image/upload/v1759628524/RWtyYW5fUmVzbWlfMjAyNS0xMC0wNV8wNC40MC4yNl9jcG9rdHo=/drilldown",
   },
   bio: {
     type: String,
