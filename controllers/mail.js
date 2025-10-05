@@ -523,18 +523,19 @@ const getMailStats = async (req, res, next) => {
           _id: null,
           total: { $sum: 1 },
           unread: { $sum: { $cond: [{ $eq: ['$isRead', false] }, 1, 0] } },
-          inbox: { $sum: { $cond: [{ $eq: ['$folder', 'inbox'] }, 1, 0] } },
-          sent: { $sum: { $cond: [{ $eq: ['$folder', 'sent'] }, 1, 0] } },
-          drafts: { $sum: { $cond: [{ $eq: ['$folder', 'drafts'] }, 1, 0] } },
-          spam: { $sum: { $cond: [{ $eq: ['$folder', 'spam'] }, 1, 0] } },
-          trash: { $sum: { $cond: [{ $eq: ['$folder', 'trash'] }, 1, 0] } },
-          archive: { $sum: { $cond: [{ $eq: ['$folder', 'archive'] }, 1, 0] } },
-          // Kategori sayıları - categories field'ı yoksa boş array kabul et
-          social: { $sum: { $cond: [{ $in: ['social', { $ifNull: ['$categories', []] }] }, 1, 0] } },
-          updates: { $sum: { $cond: [{ $in: ['updates', { $ifNull: ['$categories', []] }] }, 1, 0] } },
-          forums: { $sum: { $cond: [{ $in: ['forums', { $ifNull: ['$categories', []] }] }, 1, 0] } },
-          shopping: { $sum: { $cond: [{ $in: ['shopping', { $ifNull: ['$categories', []] }] }, 1, 0] } },
-          promotions: { $sum: { $cond: [{ $in: ['promotions', { $ifNull: ['$categories', []] }] }, 1, 0] } }
+          // Okunmamış mail sayıları - sadece okunmamış mailleri say
+          inbox: { $sum: { $cond: [{ $and: [{ $eq: ['$folder', 'inbox'] }, { $eq: ['$isRead', false] }] }, 1, 0] } },
+          sent: { $sum: { $cond: [{ $and: [{ $eq: ['$folder', 'sent'] }, { $eq: ['$isRead', false] }] }, 1, 0] } },
+          drafts: { $sum: { $cond: [{ $and: [{ $eq: ['$folder', 'drafts'] }, { $eq: ['$isRead', false] }] }, 1, 0] } },
+          spam: { $sum: { $cond: [{ $and: [{ $eq: ['$folder', 'spam'] }, { $eq: ['$isRead', false] }] }, 1, 0] } },
+          trash: { $sum: { $cond: [{ $and: [{ $eq: ['$folder', 'trash'] }, { $eq: ['$isRead', false] }] }, 1, 0] } },
+          archive: { $sum: { $cond: [{ $and: [{ $eq: ['$folder', 'archive'] }, { $eq: ['$isRead', false] }] }, 1, 0] } },
+          // Kategori okunmamış sayıları - sadece okunmamış mailleri say
+          social: { $sum: { $cond: [{ $and: [{ $in: ['social', { $ifNull: ['$categories', []] }] }, { $eq: ['$isRead', false] }] }, 1, 0] } },
+          updates: { $sum: { $cond: [{ $and: [{ $in: ['updates', { $ifNull: ['$categories', []] }] }, { $eq: ['$isRead', false] }] }, 1, 0] } },
+          forums: { $sum: { $cond: [{ $and: [{ $in: ['forums', { $ifNull: ['$categories', []] }] }, { $eq: ['$isRead', false] }] }, 1, 0] } },
+          shopping: { $sum: { $cond: [{ $and: [{ $in: ['shopping', { $ifNull: ['$categories', []] }] }, { $eq: ['$isRead', false] }] }, 1, 0] } },
+          promotions: { $sum: { $cond: [{ $and: [{ $in: ['promotions', { $ifNull: ['$categories', []] }] }, { $eq: ['$isRead', false] }] }, 1, 0] } }
         }
       }
     ]);
