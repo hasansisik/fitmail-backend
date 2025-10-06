@@ -246,8 +246,10 @@ const getMyProfile = async (req, res, next) => {
       .populate("address");
 
     if (!user) {
-      return res.status(404).json({
+      return res.status(401).json({
         success: false,
+        message: "Oturum süreniz dolmuş. Lütfen tekrar giriş yapın.",
+        requiresLogout: true
       });
     }
 
