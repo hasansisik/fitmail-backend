@@ -38,6 +38,11 @@ const register = async (req, res, next) => {
       }
     }
 
+    // Recovery email is now required
+    if (!recoveryEmail) {
+      throw new CustomError.BadRequestError("Kurtarıcı e-posta adresi gereklidir.");
+    }
+
     // Create Auth document
     const auth = new Auth({
       password,
@@ -63,7 +68,7 @@ const register = async (req, res, next) => {
       birthDate: birthDate ? new Date(birthDate) : undefined,
       gender,
       mailAddress: email, // Use email as mailAddress
-      recoveryEmail: recoveryEmail || undefined,
+      recoveryEmail: recoveryEmail,
       auth: auth._id,
       profile: profile._id,
       isVerified: true, // No email verification needed
@@ -369,11 +374,17 @@ const forgotPassword = async (req, res) => {
   const user = await User.findOne({ email }).populate("auth");
 
   if (user) {
+    // Check if user has a recovery email
+    if (!user.recoveryEmail) {
+      throw new CustomError.BadRequestError("Bu hesap için kurtarıcı e-posta adresi bulunamadı. Lütfen destek ile iletişime geçin.");
+    }
+
     const passwordToken = Math.floor(1000 + Math.random() * 9000);
 
+    // Send password reset email to recovery email instead of user's email
     await sendResetPasswordEmail({
       name: user.name,
-      email: user.email,
+      email: user.recoveryEmail,
       passwordToken: passwordToken,
     });
 
@@ -389,7 +400,7 @@ const forgotPassword = async (req, res) => {
   }
 
   res.status(StatusCodes.OK).json({
-    message: "Şifre sıfırlama bağlantısı için lütfen e-postanızı kontrol edin.",
+    message: "Şifre sıfırlama kodu kurtarıcı e-posta adresinize gönderildi.",
   });
 };
 
