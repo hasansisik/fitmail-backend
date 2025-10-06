@@ -891,15 +891,43 @@ const handleMailgunWebhook = async (req, res, next) => {
       });
     }
 
-    // Attachment'ları parse et
+    // Attachment'ları parse et - Gmail için geliştirilmiş parsing
     const attachments = [];
-    if (webhookData['attachment-count'] && parseInt(webhookData['attachment-count']) > 0) {
-      const attachmentCount = parseInt(webhookData['attachment-count']);
-      for (let i = 1; i <= attachmentCount; i++) {
-        const attachmentName = webhookData[`attachment-${i}`];
-        const attachmentUrl = webhookData[`attachment-${i}-url`];
-        const attachmentSize = webhookData[`attachment-${i}-size`];
-        const attachmentType = webhookData[`attachment-${i}-content-type`];
+    console.log('Webhook data keys:', Object.keys(webhookData));
+    console.log('Full webhook data:', JSON.stringify(webhookData, null, 2));
+    
+    // Tüm mail sağlayıcılarından gelen attachment'ları özel olarak logla
+    console.log('Mail detected - checking for attachments...');
+    Object.keys(webhookData).forEach(key => {
+      if (key.toLowerCase().includes('attachment') || 
+          key.toLowerCase().includes('file') || 
+          key.toLowerCase().includes('document') ||
+          key.toLowerCase().includes('image') ||
+          key.toLowerCase().includes('photo') ||
+          key.toLowerCase().includes('attach')) {
+        console.log(`Attachment key found: ${key} = ${webhookData[key]}`);
+      }
+    });
+    
+    // Farklı attachment formatlarını kontrol et
+    const attachmentCount = webhookData['attachment-count'] || webhookData['attachment_count'] || webhookData['attachmentCount'] || 0;
+    console.log('Attachment count:', attachmentCount);
+    
+    if (parseInt(attachmentCount) > 0) {
+      const count = parseInt(attachmentCount);
+      for (let i = 1; i <= count; i++) {
+        // Farklı key formatlarını dene
+        const attachmentName = webhookData[`attachment-${i}`] || webhookData[`attachment_${i}`] || webhookData[`attachment${i}`];
+        const attachmentUrl = webhookData[`attachment-${i}-url`] || webhookData[`attachment_${i}_url`] || webhookData[`attachment${i}_url`];
+        const attachmentSize = webhookData[`attachment-${i}-size`] || webhookData[`attachment_${i}_size`] || webhookData[`attachment${i}_size`];
+        const attachmentType = webhookData[`attachment-${i}-content-type`] || webhookData[`attachment_${i}_content_type`] || webhookData[`attachment${i}_content_type`];
+        
+        console.log(`Attachment ${i}:`, {
+          name: attachmentName,
+          url: attachmentUrl,
+          size: attachmentSize,
+          type: attachmentType
+        });
         
         if (attachmentName) {
           attachments.push({
@@ -913,7 +941,179 @@ const handleMailgunWebhook = async (req, res, next) => {
       }
     }
 
-    console.log('Parsed attachments:', attachments);
+    // Gmail'den gelen attachment'ları da kontrol et
+    if (webhookData['attachments'] && Array.isArray(webhookData['attachments'])) {
+      console.log('Gmail attachments array:', webhookData['attachments']);
+      webhookData['attachments'].forEach((attachment, index) => {
+        if (attachment.filename || attachment.name) {
+          attachments.push({
+            filename: attachment.filename || attachment.name,
+            originalName: attachment.filename || attachment.name,
+            mimeType: attachment.contentType || attachment.mimeType || 'application/octet-stream',
+            size: attachment.size || 0,
+            url: attachment.url || null
+          });
+        }
+      });
+    }
+
+    // Gmail'in farklı attachment formatlarını kontrol et
+    Object.keys(webhookData).forEach(key => {
+      if (key.includes('attachment') && !key.includes('count') && !key.includes('url') && !key.includes('size') && !key.includes('content-type')) {
+        console.log(`Found attachment key: ${key} = ${webhookData[key]}`);
+        // Eğer bu bir attachment dosya adı ise
+        if (webhookData[key] && typeof webhookData[key] === 'string' && webhookData[key].includes('.')) {
+          const attachmentName = webhookData[key];
+          const attachmentUrl = webhookData[`${key}-url`] || webhookData[`${key}_url`];
+          const attachmentSize = webhookData[`${key}-size`] || webhookData[`${key}_size`];
+          const attachmentType = webhookData[`${key}-content-type`] || webhookData[`${key}_content_type`];
+          
+          attachments.push({
+            filename: attachmentName,
+            originalName: attachmentName,
+            mimeType: attachmentType || 'application/octet-stream',
+            size: attachmentSize ? parseInt(attachmentSize) : 0,
+            url: attachmentUrl || null
+          });
+        }
+      }
+    });
+
+    // Tüm mail sağlayıcılarının özel attachment formatlarını kontrol et
+    // Gmail, Outlook, Yahoo vb. bazen attachment'ları farklı key'lerle gönderebilir
+    const attachmentKeys = Object.keys(webhookData).filter(key => 
+      key.toLowerCase().includes('attachment') || 
+      key.toLowerCase().includes('file') || 
+      key.toLowerCase().includes('document') ||
+      key.toLowerCase().includes('image') ||
+      key.toLowerCase().includes('photo') ||
+      key.toLowerCase().includes('attach') ||
+      key.toLowerCase().includes('media')
+    );
+    
+    console.log('All attachment keys found:', attachmentKeys);
+    
+    attachmentKeys.forEach(key => {
+      const value = webhookData[key];
+      if (value && typeof value === 'string' && (value.includes('.') || value.includes('http'))) {
+        console.log(`Processing attachment key: ${key} = ${value}`);
+        
+        // Dosya adını çıkar
+        let filename = value;
+        if (value.includes('/')) {
+          filename = value.split('/').pop() || value;
+        }
+        
+        // URL'yi bul
+        const url = value.startsWith('http') ? value : null;
+        
+        // MIME type'ı tahmin et
+        let mimeType = 'application/octet-stream';
+        if (filename.includes('.jpg') || filename.includes('.jpeg')) mimeType = 'image/jpeg';
+        else if (filename.includes('.png')) mimeType = 'image/png';
+        else if (filename.includes('.gif')) mimeType = 'image/gif';
+        else if (filename.includes('.pdf')) mimeType = 'application/pdf';
+        else if (filename.includes('.doc')) mimeType = 'application/msword';
+        else if (filename.includes('.docx')) mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+        else if (filename.includes('.txt')) mimeType = 'text/plain';
+        else if (filename.includes('.zip')) mimeType = 'application/zip';
+        else if (filename.includes('.rar')) mimeType = 'application/x-rar-compressed';
+        else if (filename.includes('.mp4')) mimeType = 'video/mp4';
+        else if (filename.includes('.mp3')) mimeType = 'audio/mpeg';
+        
+        // Eğer bu attachment zaten eklenmemişse ekle
+        const existingAttachment = attachments.find(att => att.filename === filename);
+        if (!existingAttachment) {
+          attachments.push({
+            filename: filename,
+            originalName: filename,
+            mimeType: mimeType,
+            size: 0, // Mail sağlayıcılarından gelen attachment'larda size bilgisi olmayabilir
+            url: url
+          });
+        }
+      }
+    });
+
+    console.log('Final parsed attachments:', attachments);
+
+    // Otomatik etiketleme sistemi
+    const autoLabels = [];
+    const autoCategories = [];
+    
+    // Tüm mail sağlayıcılarından gelen mail için otomatik etiketleme
+    if (sender.includes('@gmail.com') || sender.includes('@gozdedijital.xyz') || sender.includes('@outlook.com') || sender.includes('@hotmail.com') || sender.includes('@yahoo.com')) {
+      console.log('Gmail mail detected, applying auto-labeling...');
+      
+      // Sosyal medya etiketleri
+      const socialKeywords = ['facebook', 'twitter', 'instagram', 'linkedin', 'youtube', 'tiktok', 'snapchat', 'pinterest', 'reddit', 'discord', 'telegram', 'whatsapp'];
+      const socialDomains = ['facebook.com', 'twitter.com', 'instagram.com', 'linkedin.com', 'youtube.com', 'tiktok.com', 'snapchat.com', 'pinterest.com', 'reddit.com', 'discord.com', 'telegram.org', 'whatsapp.com'];
+      
+      // Güncellemeler etiketleri
+      const updateKeywords = ['güncelleme', 'update', 'newsletter', 'bildirim', 'notification', 'duyuru', 'announcement'];
+      const updateDomains = ['github.com', 'stackoverflow.com', 'medium.com', 'dev.to', 'hashnode.com'];
+      
+      // Forum etiketleri
+      const forumKeywords = ['forum', 'community', 'discussion', 'tartışma', 'topluluk', 'soru', 'cevap', 'help', 'yardım'];
+      const forumDomains = ['stackoverflow.com', 'reddit.com', 'quora.com', 'medium.com', 'dev.to'];
+      
+      // Alışveriş etiketleri
+      const shoppingKeywords = ['sipariş', 'order', 'satın', 'purchase', 'fatura', 'invoice', 'ödeme', 'payment', 'kargo', 'shipping', 'teslimat', 'delivery'];
+      const shoppingDomains = ['amazon.com', 'amazon.com.tr', 'trendyol.com', 'hepsiburada.com', 'n11.com', 'gittigidiyor.com', 'sahibinden.com'];
+      
+      // Promosyon etiketleri
+      const promotionKeywords = ['indirim', 'discount', 'kampanya', 'campaign', 'promosyon', 'promotion', 'fırsat', 'opportunity', 'teklif', 'offer', 'kupon', 'coupon'];
+      const promotionDomains = ['marketing', 'promo', 'sale', 'deal'];
+      
+      // İçerik analizi
+      const contentToAnalyze = `${subject} ${bodyPlain}`.toLowerCase();
+      const senderDomain = sender.split('@')[1]?.toLowerCase();
+      
+      console.log('Analyzing content:', { subject, senderDomain, contentLength: contentToAnalyze.length });
+      
+      // Sosyal etiket kontrolü
+      if (socialKeywords.some(keyword => contentToAnalyze.includes(keyword)) || 
+          socialDomains.some(domain => senderDomain?.includes(domain))) {
+        autoLabels.push('social');
+        autoCategories.push('social');
+        console.log('Applied SOCIAL label');
+      }
+      
+      // Güncellemeler etiket kontrolü
+      if (updateKeywords.some(keyword => contentToAnalyze.includes(keyword)) || 
+          updateDomains.some(domain => senderDomain?.includes(domain))) {
+        autoLabels.push('updates');
+        autoCategories.push('updates');
+        console.log('Applied UPDATES label');
+      }
+      
+      // Forum etiket kontrolü
+      if (forumKeywords.some(keyword => contentToAnalyze.includes(keyword)) || 
+          forumDomains.some(domain => senderDomain?.includes(domain))) {
+        autoLabels.push('forums');
+        autoCategories.push('forums');
+        console.log('Applied FORUMS label');
+      }
+      
+      // Alışveriş etiket kontrolü
+      if (shoppingKeywords.some(keyword => contentToAnalyze.includes(keyword)) || 
+          shoppingDomains.some(domain => senderDomain?.includes(domain))) {
+        autoLabels.push('shopping');
+        autoCategories.push('shopping');
+        console.log('Applied SHOPPING label');
+      }
+      
+      // Promosyon etiket kontrolü
+      if (promotionKeywords.some(keyword => contentToAnalyze.includes(keyword)) || 
+          promotionDomains.some(domain => senderDomain?.includes(domain))) {
+        autoLabels.push('promotions');
+        autoCategories.push('promotions');
+        console.log('Applied PROMOTIONS label');
+      }
+    }
+    
+    console.log('Auto-generated labels:', autoLabels);
+    console.log('Auto-generated categories:', autoCategories);
 
     // Mail objesi oluştur
     const mailData = {
@@ -937,8 +1137,8 @@ const handleMailgunWebhook = async (req, res, next) => {
       messageId: messageId,
       mailgunId: messageId,
       user: recipientUser._id,
-      labels: [], // Gelen mailler için boş etiket listesi
-      categories: [], // Gelen mailler için boş kategori listesi
+      labels: autoLabels, // Otomatik etiketler
+      categories: autoCategories, // Otomatik kategoriler
       attachments: attachments // Attachment'ları ekle
     };
 
@@ -1178,5 +1378,6 @@ module.exports = {
   testWebhook,
   handleMailgunWebhook,
   cleanupTrashMails,
-  manualCleanupTrash
+  manualCleanupTrash,
+  testWebhook
 };
