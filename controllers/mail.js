@@ -884,8 +884,10 @@ const handleMailgunWebhook = async (req, res, next) => {
               const contentIds = Object.keys(idMap);
               if (contentIds.length > index) {
                 const contentId = contentIds[index];
-                // Gmail attachment URL formatı
-                const gmailUrl = `https://mail.google.com/mail/u/0?ui=2&ik=7ac7c89a8e&attid=0.${attachmentIndex}&permmsgid=${webhookData['Message-Id']}&th=${webhookData['Message-Id']}&view=att&disp=safe&realattid=${contentId.replace('<', '').replace('>', '')}&zw`;
+                // Gmail attachment URL formatı - Message-Id'yi encode et
+                const messageId = encodeURIComponent(webhookData['Message-Id']);
+                const realAttId = contentId.replace('<', '').replace('>', '');
+                const gmailUrl = `https://mail.google.com/mail/u/0?ui=2&ik=7ac7c89a8e&attid=0.${attachmentIndex}&permmsgid=${messageId}&th=${messageId}&view=att&disp=safe&realattid=${realAttId}&zw`;
                 webhookData[`attachment-${attachmentIndex}-url`] = gmailUrl;
                 console.log(`Generated Gmail URL for ${file.originalname}: ${gmailUrl}`);
               }
@@ -1251,61 +1253,68 @@ const processWebhookData = async (webhookData, res) => {
       });
     }
     
-    // Tüm mail sağlayıcılarının özel attachment formatlarını kontrol et
+    // Tüm mail sağlayıcılarının özel attachment formatlarını kontrol et (sadece multer işlemediyse)
     // Gmail, Outlook, Yahoo vb. bazen attachment'ları farklı key'lerle gönderebilir
-    const attachmentKeys = Object.keys(webhookData).filter(key => 
-      key.toLowerCase().includes('attachment') || 
-      key.toLowerCase().includes('file') || 
-      key.toLowerCase().includes('document') ||
-      key.toLowerCase().includes('image') ||
-      key.toLowerCase().includes('photo') ||
-      key.toLowerCase().includes('attach') ||
-      key.toLowerCase().includes('media')
-    );
+    if (!webhookData['_multerProcessed']) {
+      const attachmentKeys = Object.keys(webhookData).filter(key => 
+        (key.toLowerCase().includes('attachment') || 
+        key.toLowerCase().includes('file') || 
+        key.toLowerCase().includes('document') ||
+        key.toLowerCase().includes('image') ||
+        key.toLowerCase().includes('photo') ||
+        key.toLowerCase().includes('attach') ||
+        key.toLowerCase().includes('media')) &&
+        !key.includes('count') && 
+        !key.includes('url') && 
+        !key.includes('size') && 
+        !key.includes('content-type') &&
+        !key.includes('_multerProcessed')
+      );
     
-    console.log('All attachment keys found:', attachmentKeys);
-    
-    attachmentKeys.forEach(key => {
-      const value = webhookData[key];
-      if (value && typeof value === 'string' && (value.includes('.') || value.includes('http'))) {
-        console.log(`Processing attachment key: ${key} = ${value}`);
-        
-        // Dosya adını çıkar
-        let filename = value;
-        if (value.includes('/')) {
-          filename = value.split('/').pop() || value;
+      console.log('All attachment keys found:', attachmentKeys);
+      
+      attachmentKeys.forEach(key => {
+        const value = webhookData[key];
+        if (value && typeof value === 'string' && (value.includes('.') || value.includes('http'))) {
+          console.log(`Processing attachment key: ${key} = ${value}`);
+          
+          // Dosya adını çıkar
+          let filename = value;
+          if (value.includes('/')) {
+            filename = value.split('/').pop() || value;
+          }
+          
+          // URL'yi bul
+          const url = value.startsWith('http') ? value : null;
+          
+          // MIME type'ı tahmin et
+          let mimeType = 'application/octet-stream';
+          if (filename.includes('.jpg') || filename.includes('.jpeg')) mimeType = 'image/jpeg';
+          else if (filename.includes('.png')) mimeType = 'image/png';
+          else if (filename.includes('.gif')) mimeType = 'image/gif';
+          else if (filename.includes('.pdf')) mimeType = 'application/pdf';
+          else if (filename.includes('.doc')) mimeType = 'application/msword';
+          else if (filename.includes('.docx')) mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+          else if (filename.includes('.txt')) mimeType = 'text/plain';
+          else if (filename.includes('.zip')) mimeType = 'application/zip';
+          else if (filename.includes('.rar')) mimeType = 'application/x-rar-compressed';
+          else if (filename.includes('.mp4')) mimeType = 'video/mp4';
+          else if (filename.includes('.mp3')) mimeType = 'audio/mpeg';
+          
+          // Eğer bu attachment zaten eklenmemişse ekle
+          const existingAttachment = attachments.find(att => att.filename === filename);
+          if (!existingAttachment) {
+            attachments.push({
+              filename: filename,
+              originalName: filename,
+              mimeType: mimeType,
+              size: 0, // Mail sağlayıcılarından gelen attachment'larda size bilgisi olmayabilir
+              url: url
+            });
+          }
         }
-        
-        // URL'yi bul
-        const url = value.startsWith('http') ? value : null;
-        
-        // MIME type'ı tahmin et
-        let mimeType = 'application/octet-stream';
-        if (filename.includes('.jpg') || filename.includes('.jpeg')) mimeType = 'image/jpeg';
-        else if (filename.includes('.png')) mimeType = 'image/png';
-        else if (filename.includes('.gif')) mimeType = 'image/gif';
-        else if (filename.includes('.pdf')) mimeType = 'application/pdf';
-        else if (filename.includes('.doc')) mimeType = 'application/msword';
-        else if (filename.includes('.docx')) mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-        else if (filename.includes('.txt')) mimeType = 'text/plain';
-        else if (filename.includes('.zip')) mimeType = 'application/zip';
-        else if (filename.includes('.rar')) mimeType = 'application/x-rar-compressed';
-        else if (filename.includes('.mp4')) mimeType = 'video/mp4';
-        else if (filename.includes('.mp3')) mimeType = 'audio/mpeg';
-        
-        // Eğer bu attachment zaten eklenmemişse ekle
-        const existingAttachment = attachments.find(att => att.filename === filename);
-        if (!existingAttachment) {
-          attachments.push({
-            filename: filename,
-            originalName: filename,
-            mimeType: mimeType,
-            size: 0, // Mail sağlayıcılarından gelen attachment'larda size bilgisi olmayabilir
-            url: url
-          });
-        }
-      }
-    });
+      });
+    }
 
     console.log('=== ATTACHMENT PARSING COMPLETE ===');
     console.log('Final parsed attachments:', attachments);
