@@ -92,7 +92,7 @@ router.patch('/:id/starred', isAuthenticated, markMailAsStarred);
 router.patch('/:id/snooze', isAuthenticated, snoozeMail);
 
 // Mail'e cevap ekle
-router.post('/:id/reply', isAuthenticated, addReplyToMail);
+router.post('/:id/reply', isAuthenticated, upload.array('attachments', 5), addReplyToMail);
 
 // Mail adresini kontrol et
 router.post('/check-address', isAuthenticated, checkMailAddress);

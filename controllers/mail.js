@@ -1645,6 +1645,10 @@ const addReplyToMail = async (req, res, next) => {
     const { id } = req.params;
     const { content, replyTo } = req.body;
     const userId = req.user.userId;
+    const files = req.files || [];
+
+    console.log("addReplyToMail request body:", req.body);
+    console.log("addReplyToMail files:", files);
 
     if (!content) {
       throw new CustomError.BadRequestError("Cevap içeriği gereklidir");
@@ -1662,6 +1666,25 @@ const addReplyToMail = async (req, res, next) => {
       throw new CustomError.NotFoundError("Kullanıcı bulunamadı");
     }
 
+    // Attachment'ları hazırla (sendMail ile aynı format)
+    const attachmentNames = req.body.attachmentNames ? JSON.parse(req.body.attachmentNames) : [];
+    const attachmentTypes = req.body.attachmentTypes ? JSON.parse(req.body.attachmentTypes) : [];
+    const attachmentUrls = req.body.attachmentUrls ? JSON.parse(req.body.attachmentUrls) : [];
+    
+    console.log("Attachment names:", attachmentNames);
+    console.log("Attachment types:", attachmentTypes);
+    console.log("Attachment URLs:", attachmentUrls);
+    
+    const attachments = files.map((file, index) => ({
+      filename: attachmentNames[index] || file.originalname,
+      data: file.buffer,
+      contentType: attachmentTypes[index] || file.mimetype,
+      size: file.size,
+      url: attachmentUrls[index] || null
+    }));
+    
+    console.log("Final attachments:", attachments.map(att => ({ filename: att.filename, url: att.url })));
+
     // Cevabı orijinal maile ekle
     const replyData = {
       sender: `${user.name} ${user.surname}`,
@@ -1677,11 +1700,14 @@ const addReplyToMail = async (req, res, next) => {
       to: originalMail.from.email,
       subject: originalMail.subject.startsWith('Re:') ? originalMail.subject : `Re: ${originalMail.subject}`,
       text: content,
-      html: content.replace(/\n/g, '<br>')
+      html: content.replace(/\n/g, '<br>'),
+      attachments: attachments || []
     };
 
+    console.log("Mailgun data for reply:", { ...mailgunData, attachments: mailgunData.attachments.map(att => ({ filename: att.filename, url: att.url })) });
     const mailgunResult = await mailgunService.sendMail(mailgunData);
-
+    console.log("Mailgun result for reply:", mailgunResult);
+    
     if (mailgunResult.success) {
       res.status(StatusCodes.OK).json({
         success: true,
