@@ -43,7 +43,7 @@ const router = express.Router();
 
 // Mailgun webhook - gelen mailleri almak için (authentication yok!)
 // multipart/form-data ve application/x-www-form-urlencoded formatlarını destekle
-router.post('/webhook', express.urlencoded({ extended: true }), handleMailgunWebhook);
+router.post('/webhook', upload.any(), handleMailgunWebhook);
 
 // Mail gönderme
 router.post('/send', isAuthenticated, upload.array('attachments', 5), sendMail);

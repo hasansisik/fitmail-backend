@@ -843,69 +843,37 @@ const handleMailgunWebhook = async (req, res, next) => {
     console.log('=== MAILGUN WEBHOOK RECEIVED ===');
     console.log('Headers:', JSON.stringify(req.headers, null, 2));
     console.log('Body:', JSON.stringify(req.body, null, 2));
+    console.log('Files:', req.files ? req.files.map(f => ({ fieldname: f.fieldname, originalname: f.originalname, mimetype: f.mimetype, size: f.size })) : 'No files');
     console.log('Content-Type:', req.headers['content-type']);
     console.log('================================');
     
     let webhookData = req.body;
     
-    // Eğer multipart/form-data ise ve body boşsa, raw body'yi parse etmeye çalış
-    if (req.headers['content-type'] && req.headers['content-type'].includes('multipart/form-data') && Object.keys(req.body).length === 0) {
-      console.log('Multipart form-data detected but body is empty, trying to parse raw body...');
-      
-      // Raw body'yi string olarak al
-      let rawBody = '';
-      req.on('data', chunk => {
-        rawBody += chunk.toString();
-      });
-      
-      req.on('end', () => {
-        console.log('Raw body length:', rawBody.length);
-        console.log('Raw body preview:', rawBody.substring(0, 500));
+    // Eğer files varsa, bunları webhookData'ya ekle
+    if (req.files && req.files.length > 0) {
+      console.log('Processing uploaded files...');
+      req.files.forEach((file, index) => {
+        console.log(`File ${index}:`, {
+          fieldname: file.fieldname,
+          originalname: file.originalname,
+          mimetype: file.mimetype,
+          size: file.size
+        });
         
-        // Multipart boundary'yi bul
-        const contentType = req.headers['content-type'];
-        const boundaryMatch = contentType.match(/boundary=([^;]+)/);
+        // Mailgun'un attachment formatına uygun olarak ekle
+        const attachmentIndex = index + 1;
+        webhookData[`attachment-${attachmentIndex}`] = file.originalname;
+        webhookData[`attachment-${attachmentIndex}-content-type`] = file.mimetype;
+        webhookData[`attachment-${attachmentIndex}-size`] = file.size.toString();
         
-        if (boundaryMatch) {
-          const boundary = boundaryMatch[1];
-          console.log('Boundary found:', boundary);
-          
-          // Multipart data'yı parse et
-          const parts = rawBody.split(`--${boundary}`);
-          console.log('Parts count:', parts.length);
-          
-          const parsedData = {};
-          
-          parts.forEach((part, index) => {
-            if (part.trim() && !part.includes('--')) {
-              console.log(`Part ${index}:`, part.substring(0, 200));
-              
-              // Content-Disposition header'ını bul
-              const dispositionMatch = part.match(/Content-Disposition:\s*form-data;\s*name="([^"]+)"/);
-              if (dispositionMatch) {
-                const fieldName = dispositionMatch[1];
-                console.log('Field name:', fieldName);
-                
-                // Value'yu bul (header'dan sonraki kısım)
-                const valueMatch = part.match(/\r?\n\r?\n(.*)$/s);
-                if (valueMatch) {
-                  const value = valueMatch[1].trim();
-                  parsedData[fieldName] = value;
-                  console.log(`Parsed ${fieldName}:`, value.substring(0, 100));
-                }
-              }
-            }
-          });
-          
-          console.log('Parsed multipart data:', Object.keys(parsedData));
-          webhookData = parsedData;
-          
-          // Webhook'u işle
-          processWebhookData(webhookData, res);
+        // Eğer fieldname attachment içeriyorsa, o field'ı da ekle
+        if (file.fieldname.includes('attachment')) {
+          webhookData[file.fieldname] = file.originalname;
         }
       });
       
-      return; // Raw body parsing tamamlanana kadar bekle
+      // Attachment count'u güncelle
+      webhookData['attachment-count'] = req.files.length.toString();
     }
     
     // Normal webhook işleme
