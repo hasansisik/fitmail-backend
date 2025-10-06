@@ -984,14 +984,18 @@ const processWebhookData = async (webhookData, res) => {
           type: attachmentType
         });
         
-        if (attachmentName) {
-          attachments.push({
-            filename: attachmentName,
-            originalName: attachmentName,
-            mimeType: attachmentType || 'application/octet-stream',
-            size: attachmentSize ? parseInt(attachmentSize) : 0,
-            url: attachmentUrl || null
-          });
+        if (attachmentName && !attachmentName.includes('{') && !attachmentName.includes('}')) {
+          // Duplicate kontrolü - aynı filename zaten varsa ekleme
+          const existingAttachment = attachments.find(att => att.filename === attachmentName);
+          if (!existingAttachment) {
+            attachments.push({
+              filename: attachmentName,
+              originalName: attachmentName,
+              mimeType: attachmentType || 'application/octet-stream',
+              size: attachmentSize ? parseInt(attachmentSize) : 0,
+              url: attachmentUrl || null
+            });
+          }
         }
       }
     }
@@ -1157,6 +1161,12 @@ const processWebhookData = async (webhookData, res) => {
         
         if (hasFileExtension || isUrl || isGmailAttachment) {
           console.log(`Processing Gmail attachment key: ${key} = ${value}`);
+          
+          // JSON formatındaki değerleri atla (content-id-map gibi)
+          if (value.includes('{') && value.includes('}')) {
+            console.log(`Skipping JSON value: ${key} = ${value}`);
+            return;
+          }
           
           // Dosya adını çıkar
           let filename = value;
