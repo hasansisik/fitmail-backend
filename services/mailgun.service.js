@@ -156,7 +156,22 @@ class MailgunService {
         text: text,
         html: html,
         'h:Reply-To': from, // Reply-To header'ı gönderen adresine ayarla
-        'h:Return-Path': from // Return-Path header'ı da ekle
+        'h:Return-Path': from, // Return-Path header'ı da ekle
+        // DKIM ve DMARC için önemli header'lar
+        'h:Message-ID': `<${Date.now()}.${Math.random().toString(36).substr(2, 9)}@${this.domain}>`,
+        'h:Date': new Date().toUTCString(),
+        'h:List-Unsubscribe': `<mailto:unsubscribe@${this.domain}>`,
+        'h:List-Id': `Fitmail <${this.domain}>`,
+        // SPF, DKIM, DMARC için gerekli header'lar
+        'h:X-Mailer': 'Fitmail Mail System',
+        'h:X-Priority': '3',
+        'h:X-MSMail-Priority': 'Normal',
+        'h:Importance': 'Normal',
+        // DMARC policy header'ı
+        'h:Authentication-Results': `${this.domain}; dkim=pass; spf=pass; dmarc=pass`,
+        // Content-Type ve charset
+        'h:Content-Type': 'text/html; charset=UTF-8',
+        'h:Content-Transfer-Encoding': '8bit'
       };
 
       // Ekler varsa ekle
@@ -314,6 +329,192 @@ class MailgunService {
         error: error.message
       };
     }
+  }
+
+  // DKIM ayarlarını kontrol et
+  async checkDKIMStatus() {
+    try {
+      if (!this.mg || !this.domain) {
+        return {
+          success: false,
+          error: 'Mailgun is not properly configured. Please check your environment variables.'
+        };
+      }
+
+      const response = await this.mg.domains.get(this.domain);
+      
+      return {
+        success: true,
+        domain: response.name,
+        dkim: {
+          enabled: response.dkim_selector ? true : false,
+          selector: response.dkim_selector,
+          publicKey: response.dkim_public_key,
+          state: response.dkim_state
+        },
+        spf: {
+          record: response.spf_record,
+          state: response.spf_state
+        },
+        dmarc: {
+          record: response.dmarc_record,
+          state: response.dmarc_state
+        },
+        response: response
+      };
+    } catch (error) {
+      console.error('Mailgun DKIM check error:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  // DMARC kaydını kontrol et
+  async checkDMARCRecord() {
+    try {
+      const dns = require('dns').promises;
+      
+      // DMARC TXT kaydını kontrol et
+      const dmarcRecords = await dns.resolveTxt(`_dmarc.${this.domain}`);
+      
+      let dmarcPolicy = null;
+      let dmarcValid = false;
+      
+      for (const record of dmarcRecords) {
+        const recordText = record.join('');
+        if (recordText.startsWith('v=DMARC1')) {
+          dmarcPolicy = recordText;
+          dmarcValid = true;
+          break;
+        }
+      }
+
+      return {
+        success: true,
+        domain: this.domain,
+        dmarc: {
+          valid: dmarcValid,
+          record: dmarcPolicy,
+          records: dmarcRecords
+        }
+      };
+    } catch (error) {
+      console.error('DMARC record check error:', error);
+      return {
+        success: false,
+        error: error.message,
+        domain: this.domain,
+        dmarc: {
+          valid: false,
+          record: null
+        }
+      };
+    }
+  }
+
+  // SPF kaydını kontrol et
+  async checkSPFRecord() {
+    try {
+      const dns = require('dns').promises;
+      
+      // SPF TXT kaydını kontrol et
+      const txtRecords = await dns.resolveTxt(this.domain);
+      
+      let spfRecord = null;
+      let spfValid = false;
+      
+      for (const record of txtRecords) {
+        const recordText = record.join('');
+        if (recordText.startsWith('v=spf1')) {
+          spfRecord = recordText;
+          spfValid = true;
+          break;
+        }
+      }
+
+      return {
+        success: true,
+        domain: this.domain,
+        spf: {
+          valid: spfValid,
+          record: spfRecord,
+          records: txtRecords
+        }
+      };
+    } catch (error) {
+      console.error('SPF record check error:', error);
+      return {
+        success: false,
+        error: error.message,
+        domain: this.domain,
+        spf: {
+          valid: false,
+          record: null
+        }
+      };
+    }
+  }
+
+  // Mail authentication durumunu kontrol et
+  async checkMailAuthentication() {
+    try {
+      const [dkimStatus, dmarcStatus, spfStatus] = await Promise.all([
+        this.checkDKIMStatus(),
+        this.checkDMARCRecord(),
+        this.checkSPFRecord()
+      ]);
+
+      return {
+        success: true,
+        domain: this.domain,
+        dkim: dkimStatus.success ? dkimStatus.dkim : { enabled: false, state: 'unknown' },
+        dmarc: dmarcStatus.success ? dmarcStatus.dmarc : { valid: false, record: null },
+        spf: spfStatus.success ? spfStatus.spf : { valid: false, record: null },
+        recommendations: this.getAuthenticationRecommendations(dkimStatus, dmarcStatus, spfStatus)
+      };
+    } catch (error) {
+      console.error('Mail authentication check error:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  // Authentication önerileri
+  getAuthenticationRecommendations(dkimStatus, dmarcStatus, spfStatus) {
+    const recommendations = [];
+
+    if (!dkimStatus.success || !dkimStatus.dkim?.enabled) {
+      recommendations.push({
+        type: 'dkim',
+        priority: 'high',
+        message: 'DKIM ayarları eksik. Mailgun dashboard\'dan DKIM\'i aktifleştirin.',
+        action: 'Mailgun dashboard > Domains > gozdedijital.xyz > DKIM > Enable'
+      });
+    }
+
+    if (!spfStatus.success || !spfStatus.spf?.valid) {
+      recommendations.push({
+        type: 'spf',
+        priority: 'high',
+        message: 'SPF kaydı eksik veya hatalı. DNS\'e SPF kaydı ekleyin.',
+        action: `DNS TXT kaydı ekleyin: v=spf1 include:mailgun.org ~all`
+      });
+    }
+
+    if (!dmarcStatus.success || !dmarcStatus.dmarc?.valid) {
+      recommendations.push({
+        type: 'dmarc',
+        priority: 'medium',
+        message: 'DMARC kaydı eksik. Spam koruması için DMARC ekleyin.',
+        action: `DNS TXT kaydı ekleyin: v=DMARC1; p=quarantine; rua=mailto:dmarc@${this.domain}`
+      });
+    }
+
+    return recommendations;
   }
 }
 

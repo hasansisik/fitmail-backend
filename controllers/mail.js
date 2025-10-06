@@ -703,6 +703,21 @@ const testMailgunConfig = async (req, res, next) => {
   }
 };
 
+// Mail authentication durumunu kontrol et (DKIM, DMARC, SPF)
+const checkMailAuthentication = async (req, res, next) => {
+  try {
+    const result = await mailgunService.checkMailAuthentication();
+    
+    res.status(StatusCodes.OK).json({
+      success: true,
+      message: "Mail authentication durumu kontrol edildi",
+      result: result
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // Mailbox oluştur
 const createMailbox = async (req, res, next) => {
   try {
@@ -1797,6 +1812,7 @@ module.exports = {
   checkMailAddress,
   setupMailAddress,
   testMailgunConfig,
+  checkMailAuthentication,
   createMailbox,
   listMailboxes,
   testWebhook,

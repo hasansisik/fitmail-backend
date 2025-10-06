@@ -20,6 +20,7 @@ const {
   checkMailAddress,
   setupMailAddress,
   testMailgunConfig,
+  checkMailAuthentication,
   createMailbox,
   listMailboxes,
   testWebhook,
@@ -102,6 +103,9 @@ router.post('/setup-address', isAuthenticated, setupMailAddress);
 
 // Mailgun yapılandırmasını test et
 router.get('/test-config', isAuthenticated, testMailgunConfig);
+
+// Mail authentication durumunu kontrol et (DKIM, DMARC, SPF)
+router.get('/check-authentication', isAuthenticated, checkMailAuthentication);
 
 // Mailbox oluştur
 router.post('/create-mailbox', isAuthenticated, createMailbox);
