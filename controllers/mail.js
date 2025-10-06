@@ -8,12 +8,12 @@ const mongoose = require("mongoose");
 // Gmail attachment URL'sini düzelt
 const fixGmailAttachmentUrl = (url) => {
   if (!url || typeof url !== 'string') return url;
-  
+
   if (url.includes('mail.google.com')) {
     return url.replace('mail.google.com', 'mail-attachment.googleusercontent.com')
-              .replace('/mail/u/0', '/attachment/u/0/');
+      .replace('/mail/u/0', '/attachment/u/0/');
   }
-  
+
   return url;
 };
 
@@ -52,11 +52,11 @@ const sendMail = async (req, res, next) => {
     const attachmentNames = req.body.attachmentNames ? JSON.parse(req.body.attachmentNames) : [];
     const attachmentTypes = req.body.attachmentTypes ? JSON.parse(req.body.attachmentTypes) : [];
     const attachmentUrls = req.body.attachmentUrls ? JSON.parse(req.body.attachmentUrls) : [];
-    
+
     console.log("Attachment names:", attachmentNames);
     console.log("Attachment types:", attachmentTypes);
     console.log("Attachment URLs:", attachmentUrls);
-    
+
     const attachments = files.map((file, index) => ({
       filename: attachmentNames[index] || file.originalname,
       data: file.buffer,
@@ -64,7 +64,7 @@ const sendMail = async (req, res, next) => {
       size: file.size,
       url: attachmentUrls[index] || null // Cloudinary URL'sini ekle
     }));
-    
+
     console.log("Final attachments:", attachments.map(att => ({ filename: att.filename, url: att.url })));
 
     // Mail objesi oluştur
@@ -168,7 +168,7 @@ const getInbox = async (req, res, next) => {
     const { page = 1, limit = 20, folder = 'inbox', search, label, isRead } = req.query;
 
     const filter = { user: userId, folder };
-    
+
     if (search) {
       filter.$or = [
         { subject: { $regex: search, $options: 'i' } },
@@ -177,17 +177,17 @@ const getInbox = async (req, res, next) => {
         { 'from.email': { $regex: search, $options: 'i' } }
       ];
     }
-    
+
     if (label) {
       filter.labels = { $in: [label] };
     }
-    
+
     if (isRead !== undefined) {
       filter.isRead = isRead === 'true';
     }
 
     const skip = (page - 1) * limit;
-    
+
     const mails = await Mail.find(filter)
       .populate('user', 'name surname mailAddress')
       .sort({ createdAt: -1 })
@@ -291,7 +291,7 @@ const deleteMail = async (req, res, next) => {
       mail.folder = 'trash';
       mail.deletedAt = new Date(); // Silme tarihini kaydet
       await mail.save();
-      
+
       res.json({
         success: true,
         message: "Mail çöp kutusuna taşındı. 30 gün sonra otomatik olarak silinecek."
@@ -412,18 +412,18 @@ const getMailsByCategory = async (req, res, next) => {
 
     // Önce mevcut maillerde categories field'ı yoksa ekle
     await Mail.updateMany(
-      { 
+      {
         user: new mongoose.Types.ObjectId(userId),
         categories: { $exists: false }
       },
       { $set: { categories: [] } }
     );
 
-    const filter = { 
-      user: userId, 
+    const filter = {
+      user: userId,
       categories: { $in: [category] }
     };
-    
+
     if (search) {
       filter.$or = [
         { subject: { $regex: search, $options: 'i' } },
@@ -432,13 +432,13 @@ const getMailsByCategory = async (req, res, next) => {
         { 'from.email': { $regex: search, $options: 'i' } }
       ];
     }
-    
+
     if (isRead !== undefined) {
       filter.isRead = isRead === 'true';
     }
 
     const skip = (page - 1) * limit;
-    
+
     const mails = await Mail.find(filter)
       .populate('user', 'name surname mailAddress')
       .sort({ createdAt: -1 })
@@ -476,18 +476,18 @@ const getMailsByLabelCategory = async (req, res, next) => {
 
     // Önce mevcut maillerde categories field'ı yoksa ekle
     await Mail.updateMany(
-      { 
+      {
         user: new mongoose.Types.ObjectId(userId),
         categories: { $exists: false }
       },
       { $set: { categories: [] } }
     );
 
-    const filter = { 
-      user: userId, 
+    const filter = {
+      user: userId,
       categories: { $in: [category] }
     };
-    
+
     if (search) {
       filter.$or = [
         { subject: { $regex: search, $options: 'i' } },
@@ -496,7 +496,7 @@ const getMailsByLabelCategory = async (req, res, next) => {
         { 'from.email': { $regex: search, $options: 'i' } }
       ];
     }
-    
+
     if (isRead !== undefined) {
       filter.isRead = isRead === 'true';
     }
@@ -530,10 +530,10 @@ const getMailStats = async (req, res, next) => {
   try {
     const userId = req.user.userId;
 
-    
+
     // Önce mevcut maillerde categories field'ı yoksa ekle
     await Mail.updateMany(
-      { 
+      {
         user: new mongoose.Types.ObjectId(userId),
         categories: { $exists: false }
       },
@@ -579,8 +579,8 @@ const getMailStats = async (req, res, next) => {
       shopping: 0,
       promotions: 0
     };
-    
-    
+
+
     res.status(StatusCodes.OK).json({
       success: true,
       stats: result
@@ -620,7 +620,7 @@ const checkMailAddress = async (req, res, next) => {
 
     // Mailgun ile doğrula (opsiyonel)
     const validation = await mailgunService.validateEmail(email);
-    
+
     res.status(StatusCodes.OK).json({
       success: true,
       message: "Mail adresi kullanılabilir",
@@ -663,7 +663,7 @@ const setupMailAddress = async (req, res, next) => {
 
     // Mailgun route oluştur
     const routeResult = await mailgunService.createMailRoute(email);
-    
+
     if (!routeResult.success) {
       throw new CustomError.BadRequestError(`Mailgun route oluşturulamadı: ${routeResult.error}`);
     }
@@ -690,7 +690,7 @@ const setupMailAddress = async (req, res, next) => {
 const testMailgunConfig = async (req, res, next) => {
   try {
     const domainStatus = await mailgunService.getDomainStatus();
-    
+
     res.status(StatusCodes.OK).json({
       success: true,
       configured: domainStatus.success,
@@ -720,7 +720,7 @@ const createMailbox = async (req, res, next) => {
 
     // Mailbox oluştur
     const mailboxResult = await mailgunService.createMailbox(email);
-    
+
     if (!mailboxResult.success) {
       throw new CustomError.BadRequestError(`Mailbox oluşturulamadı: ${mailboxResult.error}`);
     }
@@ -748,7 +748,7 @@ const createMailbox = async (req, res, next) => {
 const listMailboxes = async (req, res, next) => {
   try {
     const mailboxesResult = await mailgunService.listMailboxes();
-    
+
     if (!mailboxesResult.success) {
       throw new CustomError.BadRequestError(`Mailbox'lar listelenemedi: ${mailboxesResult.error}`);
     }
@@ -792,7 +792,7 @@ const getMailById = async (req, res, next) => {
 const testWebhook = async (req, res, next) => {
   try {
     const { recipient, sender, subject, content } = req.body;
-    
+
     if (!recipient || !sender || !subject) {
       throw new CustomError.BadRequestError("Recipient, sender ve subject gereklidir");
     }
@@ -858,9 +858,9 @@ const handleMailgunWebhook = async (req, res, next) => {
     console.log('Files:', req.files ? req.files.map(f => ({ fieldname: f.fieldname, originalname: f.originalname, mimetype: f.mimetype, size: f.size })) : 'No files');
     console.log('Content-Type:', req.headers['content-type']);
     console.log('================================');
-    
+
     let webhookData = req.body;
-    
+
     // Eğer files varsa, bunları webhookData'ya ekle
     if (req.files && req.files.length > 0) {
       console.log('Processing uploaded files...');
@@ -871,19 +871,19 @@ const handleMailgunWebhook = async (req, res, next) => {
           mimetype: file.mimetype,
           size: file.size
         });
-        
+
         // Mailgun'un attachment formatına uygun olarak ekle
         const attachmentIndex = index + 1;
         webhookData[`attachment-${attachmentIndex}`] = file.originalname;
         webhookData[`attachment-${attachmentIndex}-content-type`] = file.mimetype;
         webhookData[`attachment-${attachmentIndex}-size`] = file.size.toString();
-        
+
         // Gmail attachment URL'sini bul ve ekle
-        let attachmentUrl = webhookData[`attachment-${attachmentIndex}-url`] || 
-                             webhookData[`${file.fieldname}-url`] ||
-                             webhookData[`url-${attachmentIndex}`] ||
-                             null;
-        
+        let attachmentUrl = webhookData[`attachment-${attachmentIndex}-url`] ||
+          webhookData[`${file.fieldname}-url`] ||
+          webhookData[`url-${attachmentIndex}`] ||
+          null;
+
         if (attachmentUrl) {
           // Gmail attachment URL'sini düzelt
           const fixedUrl = fixGmailAttachmentUrl(attachmentUrl);
@@ -910,27 +910,27 @@ const handleMailgunWebhook = async (req, res, next) => {
             }
           }
         }
-        
+
         // Eğer fieldname attachment içeriyorsa, o field'ı da ekle
         if (file.fieldname.includes('attachment')) {
           webhookData[file.fieldname] = file.originalname;
         }
       });
-      
+
       // Attachment count'u güncelle
       webhookData['attachment-count'] = req.files.length.toString();
-      
+
       // Multer ile işlenen dosyalar varsa, Gmail attachment detection'ı atla
       webhookData['_multerProcessed'] = true;
     }
-    
+
     // Normal webhook işleme
     processWebhookData(webhookData, res);
   } catch (error) {
     console.error('Webhook error:', error);
-    res.status(StatusCodes.OK).json({ 
+    res.status(StatusCodes.OK).json({
       message: 'Webhook received but processing failed',
-      error: error.message 
+      error: error.message
     });
   }
 };
@@ -952,28 +952,28 @@ const processWebhookData = async (webhookData, res) => {
     const bodyHtml = webhookData['body-html'] || webhookData['stripped-html'] || '';
     const timestamp = webhookData['timestamp'] ? parseInt(webhookData['timestamp']) : Date.now() / 1000;
     const messageId = webhookData['Message-Id'] || webhookData['message-id'] || `mg-${Date.now()}`;
-    
+
     // CC ve BCC bilgilerini parse et
     const cc = webhookData['cc'] ? webhookData['cc'].split(',').map(email => ({
       email: email.trim(),
       name: email.trim().split('@')[0]
     })) : [];
-    
+
     const bcc = webhookData['bcc'] ? webhookData['bcc'].split(',').map(email => ({
       email: email.trim(),
       name: email.trim().split('@')[0]
     })) : [];
 
     // Gönderen adını parse et
-    const senderName = webhookData['sender'] && webhookData['sender'].includes('<') 
+    const senderName = webhookData['sender'] && webhookData['sender'].includes('<')
       ? webhookData['sender'].split('<')[0].trim().replace(/"/g, '')
       : sender.split('@')[0];
 
-    console.log('Processing mail:', { 
-      recipient, 
-      sender, 
-      senderName, 
-      subject, 
+    console.log('Processing mail:', {
+      recipient,
+      sender,
+      senderName,
+      subject,
       messageId,
       timestamp: new Date(timestamp * 1000),
       isReply: subject.toLowerCase().startsWith('re:'),
@@ -982,10 +982,10 @@ const processWebhookData = async (webhookData, res) => {
 
     // Alıcı kullanıcıyı bul - mailAddress alanında ara
     const recipientUser = await User.findOne({ mailAddress: recipient });
-    
+
     if (!recipientUser) {
       console.log('Recipient user not found for mail address:', recipient);
-      return res.status(StatusCodes.OK).json({ 
+      return res.status(StatusCodes.OK).json({
         message: 'User not found but webhook accepted',
         recipient: recipient
       });
@@ -996,26 +996,26 @@ const processWebhookData = async (webhookData, res) => {
     console.log('=== ATTACHMENT PARSING START ===');
     console.log('Webhook data keys:', Object.keys(webhookData));
     console.log('Full webhook data:', JSON.stringify(webhookData, null, 2));
-    
+
     // Tüm mail sağlayıcılarından gelen attachment'ları özel olarak logla
     console.log('Mail detected - checking for attachments...');
     Object.keys(webhookData).forEach(key => {
-      if (key.toLowerCase().includes('attachment') || 
-          key.toLowerCase().includes('file') || 
-          key.toLowerCase().includes('document') ||
-          key.toLowerCase().includes('image') ||
-          key.toLowerCase().includes('photo') ||
-          key.toLowerCase().includes('attach') ||
-          key.toLowerCase().includes('media') ||
-          key.toLowerCase().includes('upload')) {
+      if (key.toLowerCase().includes('attachment') ||
+        key.toLowerCase().includes('file') ||
+        key.toLowerCase().includes('document') ||
+        key.toLowerCase().includes('image') ||
+        key.toLowerCase().includes('photo') ||
+        key.toLowerCase().includes('attach') ||
+        key.toLowerCase().includes('media') ||
+        key.toLowerCase().includes('upload')) {
         console.log(`Attachment key found: ${key} = ${webhookData[key]}`);
       }
     });
-    
+
     // Farklı attachment formatlarını kontrol et
     const attachmentCount = webhookData['attachment-count'] || webhookData['attachment_count'] || webhookData['attachmentCount'] || 0;
     console.log('Attachment count:', attachmentCount);
-    
+
     if (parseInt(attachmentCount) > 0) {
       const count = parseInt(attachmentCount);
       for (let i = 1; i <= count; i++) {
@@ -1024,21 +1024,21 @@ const processWebhookData = async (webhookData, res) => {
         const attachmentUrl = webhookData[`attachment-${i}-url`] || webhookData[`attachment_${i}_url`] || webhookData[`attachment${i}_url`];
         const attachmentSize = webhookData[`attachment-${i}-size`] || webhookData[`attachment_${i}_size`] || webhookData[`attachment${i}_size`];
         const attachmentType = webhookData[`attachment-${i}-content-type`] || webhookData[`attachment_${i}_content_type`] || webhookData[`attachment${i}_content_type`];
-        
+
         console.log(`Attachment ${i}:`, {
           name: attachmentName,
           url: attachmentUrl,
           size: attachmentSize,
           type: attachmentType
         });
-        
+
         if (attachmentName && !attachmentName.includes('{') && !attachmentName.includes('}')) {
           // Duplicate kontrolü - aynı filename zaten varsa ekleme
           const existingAttachment = attachments.find(att => att.filename === attachmentName);
           if (!existingAttachment) {
             // Gmail attachment URL'sini düzelt
             const fixedUrl = fixGmailAttachmentUrl(attachmentUrl);
-            
+
             attachments.push({
               filename: attachmentName,
               originalName: attachmentName,
@@ -1059,7 +1059,7 @@ const processWebhookData = async (webhookData, res) => {
         if (attachment.filename || attachment.name) {
           // Gmail attachment URL'sini düzelt
           const fixedUrl = fixGmailAttachmentUrl(attachment.url);
-          
+
           attachments.push({
             filename: attachment.filename || attachment.name,
             originalName: attachment.filename || attachment.name,
@@ -1077,141 +1077,141 @@ const processWebhookData = async (webhookData, res) => {
         if (key.includes('attachment') && !key.includes('count') && !key.includes('url') && !key.includes('size') && !key.includes('content-type')) {
           console.log(`Found attachment key: ${key} = ${webhookData[key]}`);
           // Eğer bu bir attachment dosya adı ise
-        if (webhookData[key] && typeof webhookData[key] === 'string' && webhookData[key].includes('.')) {
-          const attachmentName = webhookData[key];
-          const attachmentUrl = webhookData[`${key}-url`] || webhookData[`${key}_url`];
-          const attachmentSize = webhookData[`${key}-size`] || webhookData[`${key}_size`];
-          const attachmentType = webhookData[`${key}-content-type`] || webhookData[`${key}_content_type`];
-          
-          // Gmail attachment URL'sini düzelt
-          const fixedUrl = fixGmailAttachmentUrl(attachmentUrl);
-          
-          attachments.push({
-            filename: attachmentName,
-            originalName: attachmentName,
-            mimeType: attachmentType || 'application/octet-stream',
-            size: attachmentSize ? parseInt(attachmentSize) : 0,
-            url: fixedUrl || null
-          });
-        }
-      }
-    });
+          if (webhookData[key] && typeof webhookData[key] === 'string' && webhookData[key].includes('.')) {
+            const attachmentName = webhookData[key];
+            const attachmentUrl = webhookData[`${key}-url`] || webhookData[`${key}_url`];
+            const attachmentSize = webhookData[`${key}-size`] || webhookData[`${key}_size`];
+            const attachmentType = webhookData[`${key}-content-type`] || webhookData[`${key}_content_type`];
 
-    // Gmail'in özel attachment formatlarını kontrol et - Daha kapsamlı (sadece multer işlemediyse)
-    if (!webhookData['_multerProcessed']) {
-      console.log('=== GMAIL ATTACHMENT DETECTION ===');
-      
-      // Gmail'in farklı attachment formatlarını kontrol et
-      const gmailAttachmentKeys = Object.keys(webhookData).filter(key => 
-        key.toLowerCase().includes('attachment') || 
-        key.toLowerCase().includes('file') || 
-        key.toLowerCase().includes('document') ||
-        key.toLowerCase().includes('image') ||
-        key.toLowerCase().includes('photo') ||
-        key.toLowerCase().includes('attach') ||
-        key.toLowerCase().includes('media') ||
-        key.toLowerCase().includes('upload') ||
-        key.toLowerCase().includes('binary') ||
-        key.toLowerCase().includes('content') ||
-        key.toLowerCase().includes('part') ||
-        key.toLowerCase().includes('disposition') ||
-        key.toLowerCase().includes('transfer-encoding') ||
-        key.toLowerCase().includes('x-attachment-id') ||
-        key.toLowerCase().includes('content-id')
-      );
-      
-      console.log('Gmail attachment keys found:', gmailAttachmentKeys);
-    
-      // Gmail'in multipart/mixed formatındaki attachment'ları parse et
-      // Content-Disposition: attachment; filename="..." formatını kontrol et
-      Object.keys(webhookData).forEach(key => {
-        const value = webhookData[key];
-        if (value && typeof value === 'string') {
-          // Content-Disposition header'ını kontrol et
-          if (key.toLowerCase().includes('content-disposition') && value.includes('attachment')) {
-            console.log(`Found Content-Disposition: ${key} = ${value}`);
-            
-            // filename="..." kısmını çıkar
-            const filenameMatch = value.match(/filename="([^"]+)"/);
-            if (filenameMatch) {
-              const filename = filenameMatch[1];
-              console.log(`Extracted filename from Content-Disposition: ${filename}`);
-              
-              // MIME type'ı tahmin et
-              let mimeType = 'application/octet-stream';
-              if (filename.includes('.jpg') || filename.includes('.jpeg')) mimeType = 'image/jpeg';
-              else if (filename.includes('.png')) mimeType = 'image/png';
-              else if (filename.includes('.gif')) mimeType = 'image/gif';
-              else if (filename.includes('.pdf')) mimeType = 'application/pdf';
-              else if (filename.includes('.doc')) mimeType = 'application/msword';
-              else if (filename.includes('.docx')) mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-              else if (filename.includes('.txt')) mimeType = 'text/plain';
-              else if (filename.includes('.zip')) mimeType = 'application/zip';
-              else if (filename.includes('.rar')) mimeType = 'application/x-rar-compressed';
-              else if (filename.includes('.mp4')) mimeType = 'video/mp4';
-              else if (filename.includes('.mp3')) mimeType = 'audio/mpeg';
-              else if (filename.includes('.ppt')) mimeType = 'application/vnd.ms-powerpoint';
-              else if (filename.includes('.pptx')) mimeType = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
-              else if (filename.includes('.xls')) mimeType = 'application/vnd.ms-excel';
-              else if (filename.includes('.xlsx')) mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-              
-              // Eğer bu attachment zaten eklenmemişse ekle
-              const existingAttachment = attachments.find(att => att.filename === filename);
-              if (!existingAttachment) {
-                attachments.push({
-                  filename: filename,
-                  originalName: filename,
-                  mimeType: mimeType,
-                  size: 0,
-                  url: null
-                });
-                console.log(`Added Gmail attachment from Content-Disposition: ${filename}`);
-              }
-            }
-          }
-          
-          // Content-Type header'ını kontrol et (name="..." kısmı)
-          if (key.toLowerCase().includes('content-type') && value.includes('name=')) {
-            console.log(`Found Content-Type with name: ${key} = ${value}`);
-            
-            // name="..." kısmını çıkar
-            const nameMatch = value.match(/name="([^"]+)"/);
-            if (nameMatch) {
-              const filename = nameMatch[1];
-              console.log(`Extracted filename from Content-Type: ${filename}`);
-              
-              // MIME type'ı header'dan al
-              const mimeType = value.split(';')[0].trim();
-              
-              // Eğer bu attachment zaten eklenmemişse ekle
-              const existingAttachment = attachments.find(att => att.filename === filename);
-              if (!existingAttachment) {
-                attachments.push({
-                  filename: filename,
-                  originalName: filename,
-                  mimeType: mimeType,
-                  size: 0,
-                  url: null
-                });
-                console.log(`Added Gmail attachment from Content-Type: ${filename} (${mimeType})`);
-              }
-            }
+            // Gmail attachment URL'sini düzelt
+            const fixedUrl = fixGmailAttachmentUrl(attachmentUrl);
+
+            attachments.push({
+              filename: attachmentName,
+              originalName: attachmentName,
+              mimeType: attachmentType || 'application/octet-stream',
+              size: attachmentSize ? parseInt(attachmentSize) : 0,
+              url: fixedUrl || null
+            });
           }
         }
       });
-    }
-    
+
+      // Gmail'in özel attachment formatlarını kontrol et - Daha kapsamlı (sadece multer işlemediyse)
+      if (!webhookData['_multerProcessed']) {
+        console.log('=== GMAIL ATTACHMENT DETECTION ===');
+
+        // Gmail'in farklı attachment formatlarını kontrol et
+        const gmailAttachmentKeys = Object.keys(webhookData).filter(key =>
+          key.toLowerCase().includes('attachment') ||
+          key.toLowerCase().includes('file') ||
+          key.toLowerCase().includes('document') ||
+          key.toLowerCase().includes('image') ||
+          key.toLowerCase().includes('photo') ||
+          key.toLowerCase().includes('attach') ||
+          key.toLowerCase().includes('media') ||
+          key.toLowerCase().includes('upload') ||
+          key.toLowerCase().includes('binary') ||
+          key.toLowerCase().includes('content') ||
+          key.toLowerCase().includes('part') ||
+          key.toLowerCase().includes('disposition') ||
+          key.toLowerCase().includes('transfer-encoding') ||
+          key.toLowerCase().includes('x-attachment-id') ||
+          key.toLowerCase().includes('content-id')
+        );
+
+        console.log('Gmail attachment keys found:', gmailAttachmentKeys);
+
+        // Gmail'in multipart/mixed formatındaki attachment'ları parse et
+        // Content-Disposition: attachment; filename="..." formatını kontrol et
+        Object.keys(webhookData).forEach(key => {
+          const value = webhookData[key];
+          if (value && typeof value === 'string') {
+            // Content-Disposition header'ını kontrol et
+            if (key.toLowerCase().includes('content-disposition') && value.includes('attachment')) {
+              console.log(`Found Content-Disposition: ${key} = ${value}`);
+
+              // filename="..." kısmını çıkar
+              const filenameMatch = value.match(/filename="([^"]+)"/);
+              if (filenameMatch) {
+                const filename = filenameMatch[1];
+                console.log(`Extracted filename from Content-Disposition: ${filename}`);
+
+                // MIME type'ı tahmin et
+                let mimeType = 'application/octet-stream';
+                if (filename.includes('.jpg') || filename.includes('.jpeg')) mimeType = 'image/jpeg';
+                else if (filename.includes('.png')) mimeType = 'image/png';
+                else if (filename.includes('.gif')) mimeType = 'image/gif';
+                else if (filename.includes('.pdf')) mimeType = 'application/pdf';
+                else if (filename.includes('.doc')) mimeType = 'application/msword';
+                else if (filename.includes('.docx')) mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+                else if (filename.includes('.txt')) mimeType = 'text/plain';
+                else if (filename.includes('.zip')) mimeType = 'application/zip';
+                else if (filename.includes('.rar')) mimeType = 'application/x-rar-compressed';
+                else if (filename.includes('.mp4')) mimeType = 'video/mp4';
+                else if (filename.includes('.mp3')) mimeType = 'audio/mpeg';
+                else if (filename.includes('.ppt')) mimeType = 'application/vnd.ms-powerpoint';
+                else if (filename.includes('.pptx')) mimeType = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+                else if (filename.includes('.xls')) mimeType = 'application/vnd.ms-excel';
+                else if (filename.includes('.xlsx')) mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+                // Eğer bu attachment zaten eklenmemişse ekle
+                const existingAttachment = attachments.find(att => att.filename === filename);
+                if (!existingAttachment) {
+                  attachments.push({
+                    filename: filename,
+                    originalName: filename,
+                    mimeType: mimeType,
+                    size: 0,
+                    url: null
+                  });
+                  console.log(`Added Gmail attachment from Content-Disposition: ${filename}`);
+                }
+              }
+            }
+
+            // Content-Type header'ını kontrol et (name="..." kısmı)
+            if (key.toLowerCase().includes('content-type') && value.includes('name=')) {
+              console.log(`Found Content-Type with name: ${key} = ${value}`);
+
+              // name="..." kısmını çıkar
+              const nameMatch = value.match(/name="([^"]+)"/);
+              if (nameMatch) {
+                const filename = nameMatch[1];
+                console.log(`Extracted filename from Content-Type: ${filename}`);
+
+                // MIME type'ı header'dan al
+                const mimeType = value.split(';')[0].trim();
+
+                // Eğer bu attachment zaten eklenmemişse ekle
+                const existingAttachment = attachments.find(att => att.filename === filename);
+                if (!existingAttachment) {
+                  attachments.push({
+                    filename: filename,
+                    originalName: filename,
+                    mimeType: mimeType,
+                    size: 0,
+                    url: null
+                  });
+                  console.log(`Added Gmail attachment from Content-Type: ${filename} (${mimeType})`);
+                }
+              }
+            }
+          }
+        });
+      }
+
       gmailAttachmentKeys.forEach(key => {
         const value = webhookData[key];
         console.log(`Checking Gmail key: ${key} = ${value}`);
-        
+
         if (value && typeof value === 'string') {
           // Dosya uzantısı kontrolü
           const hasFileExtension = /\.(jpg|jpeg|png|gif|pdf|doc|docx|txt|zip|rar|mp4|mp3|avi|mov|wav|mp3|ppt|pptx|xls|xlsx)$/i.test(value);
           const isUrl = value.startsWith('http');
           const isBase64 = value.includes('base64') || value.includes('data:');
           const isGmailAttachment = value.includes('mail.google.com') || value.includes('attachment');
-          
+
           console.log(`Gmail attachment analysis for ${key}:`, {
             hasFileExtension,
             isUrl,
@@ -1219,16 +1219,16 @@ const processWebhookData = async (webhookData, res) => {
             isGmailAttachment,
             value: value.substring(0, 100) + (value.length > 100 ? '...' : '')
           });
-          
+
           if (hasFileExtension || isUrl || isGmailAttachment) {
             console.log(`Processing Gmail attachment key: ${key} = ${value}`);
-            
+
             // JSON formatındaki değerleri atla (content-id-map gibi)
             if (value.includes('{') && value.includes('}')) {
               console.log(`Skipping JSON value: ${key} = ${value}`);
               return;
             }
-            
+
             // Dosya adını çıkar
             let filename = value;
             if (value.includes('/')) {
@@ -1237,10 +1237,10 @@ const processWebhookData = async (webhookData, res) => {
             if (value.includes('\\')) {
               filename = value.split('\\').pop() || filename;
             }
-            
+
             // URL'yi bul
             const url = value.startsWith('http') ? value : null;
-            
+
             // MIME type'ı tahmin et
             let mimeType = 'application/octet-stream';
             if (filename.includes('.jpg') || filename.includes('.jpeg')) mimeType = 'image/jpeg';
@@ -1258,13 +1258,13 @@ const processWebhookData = async (webhookData, res) => {
             else if (filename.includes('.pptx')) mimeType = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
             else if (filename.includes('.xls')) mimeType = 'application/vnd.ms-excel';
             else if (filename.includes('.xlsx')) mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-            
+
             // Eğer bu attachment zaten eklenmemişse ekle
             const existingAttachment = attachments.find(att => att.filename === filename);
             if (!existingAttachment) {
               // Gmail attachment URL'sini düzelt
               const fixedUrl = fixGmailAttachmentUrl(url);
-              
+
               attachments.push({
                 filename: filename,
                 originalName: filename,
@@ -1278,41 +1278,41 @@ const processWebhookData = async (webhookData, res) => {
         }
       });
     }
-    
+
     // Tüm mail sağlayıcılarının özel attachment formatlarını kontrol et (sadece multer işlemediyse)
     // Gmail, Outlook, Yahoo vb. bazen attachment'ları farklı key'lerle gönderebilir
     if (!webhookData['_multerProcessed']) {
-      const attachmentKeys = Object.keys(webhookData).filter(key => 
-        (key.toLowerCase().includes('attachment') || 
-        key.toLowerCase().includes('file') || 
-        key.toLowerCase().includes('document') ||
-        key.toLowerCase().includes('image') ||
-        key.toLowerCase().includes('photo') ||
-        key.toLowerCase().includes('attach') ||
-        key.toLowerCase().includes('media')) &&
-        !key.includes('count') && 
-        !key.includes('url') && 
-        !key.includes('size') && 
+      const attachmentKeys = Object.keys(webhookData).filter(key =>
+        (key.toLowerCase().includes('attachment') ||
+          key.toLowerCase().includes('file') ||
+          key.toLowerCase().includes('document') ||
+          key.toLowerCase().includes('image') ||
+          key.toLowerCase().includes('photo') ||
+          key.toLowerCase().includes('attach') ||
+          key.toLowerCase().includes('media')) &&
+        !key.includes('count') &&
+        !key.includes('url') &&
+        !key.includes('size') &&
         !key.includes('content-type') &&
         !key.includes('_multerProcessed')
       );
-    
+
       console.log('All attachment keys found:', attachmentKeys);
-      
+
       attachmentKeys.forEach(key => {
         const value = webhookData[key];
         if (value && typeof value === 'string' && (value.includes('.') || value.includes('http'))) {
           console.log(`Processing attachment key: ${key} = ${value}`);
-          
+
           // Dosya adını çıkar
           let filename = value;
           if (value.includes('/')) {
             filename = value.split('/').pop() || value;
           }
-          
+
           // URL'yi bul
           const url = value.startsWith('http') ? value : null;
-          
+
           // MIME type'ı tahmin et
           let mimeType = 'application/octet-stream';
           if (filename.includes('.jpg') || filename.includes('.jpeg')) mimeType = 'image/jpeg';
@@ -1326,13 +1326,13 @@ const processWebhookData = async (webhookData, res) => {
           else if (filename.includes('.rar')) mimeType = 'application/x-rar-compressed';
           else if (filename.includes('.mp4')) mimeType = 'video/mp4';
           else if (filename.includes('.mp3')) mimeType = 'audio/mpeg';
-          
+
           // Eğer bu attachment zaten eklenmemişse ekle
           const existingAttachment = attachments.find(att => att.filename === filename);
           if (!existingAttachment) {
             // Gmail attachment URL'sini düzelt
             const fixedUrl = fixGmailAttachmentUrl(url);
-            
+
             attachments.push({
               filename: filename,
               originalName: filename,
@@ -1353,78 +1353,78 @@ const processWebhookData = async (webhookData, res) => {
     // Otomatik etiketleme sistemi
     const autoLabels = [];
     const autoCategories = [];
-    
+
     // Tüm mail sağlayıcılarından gelen mail için otomatik etiketleme
     if (sender.includes('@gmail.com') || sender.includes('@gozdedijital.xyz') || sender.includes('@outlook.com') || sender.includes('@hotmail.com') || sender.includes('@yahoo.com')) {
       console.log('Gmail mail detected, applying auto-labeling...');
-      
+
       // Sosyal medya etiketleri
       const socialKeywords = ['facebook', 'twitter', 'instagram', 'linkedin', 'youtube', 'tiktok', 'snapchat', 'pinterest', 'reddit', 'discord', 'telegram', 'whatsapp'];
       const socialDomains = ['facebook.com', 'twitter.com', 'instagram.com', 'linkedin.com', 'youtube.com', 'tiktok.com', 'snapchat.com', 'pinterest.com', 'reddit.com', 'discord.com', 'telegram.org', 'whatsapp.com'];
-      
+
       // Güncellemeler etiketleri
       const updateKeywords = ['güncelleme', 'update', 'newsletter', 'bildirim', 'notification', 'duyuru', 'announcement'];
       const updateDomains = ['github.com', 'stackoverflow.com', 'medium.com', 'dev.to', 'hashnode.com'];
-      
+
       // Forum etiketleri
       const forumKeywords = ['forum', 'community', 'discussion', 'tartışma', 'topluluk', 'soru', 'cevap', 'help', 'yardım'];
       const forumDomains = ['stackoverflow.com', 'reddit.com', 'quora.com', 'medium.com', 'dev.to'];
-      
+
       // Alışveriş etiketleri
       const shoppingKeywords = ['sipariş', 'order', 'satın', 'purchase', 'fatura', 'invoice', 'ödeme', 'payment', 'kargo', 'shipping', 'teslimat', 'delivery'];
       const shoppingDomains = ['amazon.com', 'amazon.com.tr', 'trendyol.com', 'hepsiburada.com', 'n11.com', 'gittigidiyor.com', 'sahibinden.com'];
-      
+
       // Promosyon etiketleri
       const promotionKeywords = ['indirim', 'discount', 'kampanya', 'campaign', 'promosyon', 'promotion', 'fırsat', 'opportunity', 'teklif', 'offer', 'kupon', 'coupon'];
       const promotionDomains = ['marketing', 'promo', 'sale', 'deal'];
-      
+
       // İçerik analizi
       const contentToAnalyze = `${subject} ${bodyPlain}`.toLowerCase();
       const senderDomain = sender.split('@')[1]?.toLowerCase();
-      
+
       console.log('Analyzing content:', { subject, senderDomain, contentLength: contentToAnalyze.length });
-      
+
       // Sosyal etiket kontrolü
-      if (socialKeywords.some(keyword => contentToAnalyze.includes(keyword)) || 
-          socialDomains.some(domain => senderDomain?.includes(domain))) {
+      if (socialKeywords.some(keyword => contentToAnalyze.includes(keyword)) ||
+        socialDomains.some(domain => senderDomain?.includes(domain))) {
         autoLabels.push('social');
         autoCategories.push('social');
         console.log('Applied SOCIAL label');
       }
-      
+
       // Güncellemeler etiket kontrolü
-      if (updateKeywords.some(keyword => contentToAnalyze.includes(keyword)) || 
-          updateDomains.some(domain => senderDomain?.includes(domain))) {
+      if (updateKeywords.some(keyword => contentToAnalyze.includes(keyword)) ||
+        updateDomains.some(domain => senderDomain?.includes(domain))) {
         autoLabels.push('updates');
         autoCategories.push('updates');
         console.log('Applied UPDATES label');
       }
-      
+
       // Forum etiket kontrolü
-      if (forumKeywords.some(keyword => contentToAnalyze.includes(keyword)) || 
-          forumDomains.some(domain => senderDomain?.includes(domain))) {
+      if (forumKeywords.some(keyword => contentToAnalyze.includes(keyword)) ||
+        forumDomains.some(domain => senderDomain?.includes(domain))) {
         autoLabels.push('forums');
         autoCategories.push('forums');
         console.log('Applied FORUMS label');
       }
-      
+
       // Alışveriş etiket kontrolü
-      if (shoppingKeywords.some(keyword => contentToAnalyze.includes(keyword)) || 
-          shoppingDomains.some(domain => senderDomain?.includes(domain))) {
+      if (shoppingKeywords.some(keyword => contentToAnalyze.includes(keyword)) ||
+        shoppingDomains.some(domain => senderDomain?.includes(domain))) {
         autoLabels.push('shopping');
         autoCategories.push('shopping');
         console.log('Applied SHOPPING label');
       }
-      
+
       // Promosyon etiket kontrolü
-      if (promotionKeywords.some(keyword => contentToAnalyze.includes(keyword)) || 
-          promotionDomains.some(domain => senderDomain?.includes(domain))) {
+      if (promotionKeywords.some(keyword => contentToAnalyze.includes(keyword)) ||
+        promotionDomains.some(domain => senderDomain?.includes(domain))) {
         autoLabels.push('promotions');
         autoCategories.push('promotions');
         console.log('Applied PROMOTIONS label');
       }
     }
-    
+
     console.log('Auto-generated labels:', autoLabels);
     console.log('Auto-generated categories:', autoCategories);
 
@@ -1434,9 +1434,9 @@ const processWebhookData = async (webhookData, res) => {
         email: sender,
         name: senderName
       },
-      to: [{ 
-        email: recipient, 
-        name: recipientUser.name || recipient.split('@')[0] 
+      to: [{
+        email: recipient,
+        name: recipientUser.name || recipient.split('@')[0]
       }],
       cc: cc,
       bcc: bcc,
@@ -1481,9 +1481,9 @@ const processWebhookData = async (webhookData, res) => {
   } catch (error) {
     console.error('Webhook processing error:', error);
     // Webhook hatalarında hata döndürme, Mailgun tekrar deneyebilir
-    res.status(StatusCodes.OK).json({ 
+    res.status(StatusCodes.OK).json({
       message: 'Webhook received but processing failed',
-      error: error.message 
+      error: error.message
     });
   }
 };
@@ -1571,14 +1571,14 @@ const cleanupTrashMails = async () => {
   try {
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    
+
     console.log('Cleaning up trash mails older than:', thirtyDaysAgo);
-    
+
     const result = await Mail.deleteMany({
       folder: 'trash',
       deletedAt: { $lt: thirtyDaysAgo }
     });
-    
+
     console.log(`Cleaned up ${result.deletedCount} old trash mails`);
     return result.deletedCount;
   } catch (error) {
@@ -1591,7 +1591,7 @@ const cleanupTrashMails = async () => {
 const manualCleanupTrash = async (req, res, next) => {
   try {
     const deletedCount = await cleanupTrashMails();
-    
+
     res.status(StatusCodes.OK).json({
       success: true,
       message: `${deletedCount} eski mail çöp kutusundan temizlendi`,
@@ -1606,15 +1606,15 @@ const manualCleanupTrash = async (req, res, next) => {
 const fixGmailAttachmentUrls = async (req, res, next) => {
   try {
     const userId = req.user.userId;
-    
+
     // Kullanıcının tüm maillerini bul
     const mails = await Mail.find({ user: userId });
     let fixedCount = 0;
-    
+
     for (const mail of mails) {
       if (mail.attachments && Array.isArray(mail.attachments)) {
         let hasChanges = false;
-        
+
         for (const attachment of mail.attachments) {
           if (attachment.url && attachment.url.includes('mail.google.com')) {
             attachment.url = fixGmailAttachmentUrl(attachment.url);
@@ -1622,13 +1622,13 @@ const fixGmailAttachmentUrls = async (req, res, next) => {
             fixedCount++;
           }
         }
-        
+
         if (hasChanges) {
           await mail.save();
         }
       }
     }
-    
+
     res.status(StatusCodes.OK).json({
       success: true,
       message: `${fixedCount} Gmail attachment URL'si düzeltildi`,
@@ -1681,7 +1681,7 @@ const addReplyToMail = async (req, res, next) => {
     };
 
     const mailgunResult = await mailgunService.sendMail(mailgunData);
-    
+
     if (mailgunResult.success) {
       res.status(StatusCodes.OK).json({
         success: true,
