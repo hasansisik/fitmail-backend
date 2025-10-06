@@ -1321,6 +1321,36 @@ const updateUserStatus = async (req, res, next) => {
   }
 };
 
+//Check Email Availability
+const checkEmailAvailability = async (req, res, next) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      throw new CustomError.BadRequestError("E-posta adresi gereklidir");
+    }
+
+    // Check if email already exists
+    const existingUser = await User.findOne({ email });
+    
+    if (existingUser) {
+      return res.status(200).json({
+        success: true,
+        available: false,
+        message: "Bu e-posta adresi zaten kullanılıyor"
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      available: true,
+      message: "E-posta adresi kullanılabilir"
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   register,
   googleRegister,
@@ -1342,4 +1372,5 @@ module.exports = {
   deleteUser,
   updateUserRole,
   updateUserStatus,
+  checkEmailAvailability,
 };
