@@ -3,6 +3,7 @@ const { User } = require("../models/User");
 const { StatusCodes } = require("http-status-codes");
 const CustomError = require("../errors");
 const mailgunService = require("../services/mailgun.service");
+const { uploadFileToCloudinary } = require("../helpers/uploadToCloudinary");
 const mongoose = require("mongoose");
 
 // Gmail attachment URL'sini düzelt
@@ -861,10 +862,12 @@ const handleMailgunWebhook = async (req, res, next) => {
 
     let webhookData = req.body;
 
-    // Eğer files varsa, bunları webhookData'ya ekle
+    // Eğer files varsa, bunları Cloudinary'ye yükle ve webhookData'ya ekle
     if (req.files && req.files.length > 0) {
       console.log('Processing uploaded files...');
-      req.files.forEach((file, index) => {
+      
+      // Tüm dosyaları Cloudinary'ye yükle (paralel)
+      const uploadPromises = req.files.map(async (file, index) => {
         console.log(`File ${index}:`, {
           fieldname: file.fieldname,
           originalname: file.originalname,
@@ -872,41 +875,86 @@ const handleMailgunWebhook = async (req, res, next) => {
           size: file.size
         });
 
-        // Mailgun'un attachment formatına uygun olarak ekle
+        try {
+          // Cloudinary'ye yükle
+          const cloudinaryUrl = await uploadFileToCloudinary(
+            file.buffer,
+            file.originalname,
+            file.mimetype
+          );
+          
+          console.log(`✅ Uploaded to Cloudinary: ${file.originalname} -> ${cloudinaryUrl}`);
+          
+          return {
+            index,
+            file,
+            cloudinaryUrl
+          };
+        } catch (error) {
+          console.error(`❌ Failed to upload ${file.originalname} to Cloudinary:`, error);
+          
+          // Hata durumunda da devam et ama URL olmadan
+          return {
+            index,
+            file,
+            cloudinaryUrl: null
+          };
+        }
+      });
+
+      // Tüm yüklemelerin tamamlanmasını bekle
+      const uploadResults = await Promise.all(uploadPromises);
+      
+      // Sonuçları webhookData'ya ekle
+      uploadResults.forEach(({ index, file, cloudinaryUrl }) => {
         const attachmentIndex = index + 1;
         webhookData[`attachment-${attachmentIndex}`] = file.originalname;
         webhookData[`attachment-${attachmentIndex}-content-type`] = file.mimetype;
         webhookData[`attachment-${attachmentIndex}-size`] = file.size.toString();
-
-        // Gmail attachment URL'sini bul ve ekle
-        let attachmentUrl = webhookData[`attachment-${attachmentIndex}-url`] ||
-          webhookData[`${file.fieldname}-url`] ||
-          webhookData[`url-${attachmentIndex}`] ||
-          null;
-
-        if (attachmentUrl) {
-          // Gmail attachment URL'sini düzelt
-          const fixedUrl = fixGmailAttachmentUrl(attachmentUrl);
-          webhookData[`attachment-${attachmentIndex}-url`] = fixedUrl;
-          console.log(`Found attachment URL for ${file.originalname}: ${fixedUrl}`);
+        
+        // Cloudinary URL'sini kullan
+        if (cloudinaryUrl) {
+          webhookData[`attachment-${attachmentIndex}-url`] = cloudinaryUrl;
+          console.log(`✅ Cloudinary URL saved for ${file.originalname}: ${cloudinaryUrl}`);
         } else {
-          // Gmail attachment URL'sini content-id-map'ten çıkarmaya çalış
-          const contentIdMap = webhookData['content-id-map'];
-          if (contentIdMap) {
-            try {
-              const idMap = JSON.parse(contentIdMap);
-              const contentIds = Object.keys(idMap);
-              if (contentIds.length > index) {
-                const contentId = contentIds[index];
-                // Gmail attachment URL formatı - Message-Id'yi encode et
-                const messageId = encodeURIComponent(webhookData['Message-Id']);
-                const realAttId = contentId.replace('<', '').replace('>', '');
-                const gmailUrl = `https://mail-attachment.googleusercontent.com/attachment/u/0/?ui=2&ik=7ac7c89a8e&attid=0.${attachmentIndex}&permmsgid=${messageId}&th=${messageId}&view=att&disp=safe&realattid=${realAttId}&zw`;
-                webhookData[`attachment-${attachmentIndex}-url`] = gmailUrl;
-                console.log(`Generated Gmail URL for ${file.originalname}: ${gmailUrl}`);
+          console.log(`⚠️ No Cloudinary URL for ${file.originalname}, will try alternative sources`);
+        }
+      });
+
+      // Eski Gmail URL bulma kodunu koruyalım (fallback için - Cloudinary başarısız olursa)
+      req.files.forEach((file, index) => {
+        const attachmentIndex = index + 1;
+
+        // Eğer Cloudinary URL'si yoksa Gmail attachment URL'sini bul
+        if (!webhookData[`attachment-${attachmentIndex}-url`]) {
+          let attachmentUrl = webhookData[`${file.fieldname}-url`] ||
+            webhookData[`url-${attachmentIndex}`] ||
+            null;
+
+          if (attachmentUrl) {
+            // Gmail attachment URL'sini düzelt
+            const fixedUrl = fixGmailAttachmentUrl(attachmentUrl);
+            webhookData[`attachment-${attachmentIndex}-url`] = fixedUrl;
+            console.log(`Found attachment URL for ${file.originalname}: ${fixedUrl}`);
+          } else {
+            // Gmail attachment URL'sini content-id-map'ten çıkarmaya çalış
+            const contentIdMap = webhookData['content-id-map'];
+            if (contentIdMap) {
+              try {
+                const idMap = JSON.parse(contentIdMap);
+                const contentIds = Object.keys(idMap);
+                if (contentIds.length > index) {
+                  const contentId = contentIds[index];
+                  // Gmail attachment URL formatı - Message-Id'yi encode et
+                  const messageId = encodeURIComponent(webhookData['Message-Id']);
+                  const realAttId = contentId.replace('<', '').replace('>', '');
+                  const gmailUrl = `https://mail-attachment.googleusercontent.com/attachment/u/0/?ui=2&ik=7ac7c89a8e&attid=0.${attachmentIndex}&permmsgid=${messageId}&th=${messageId}&view=att&disp=safe&realattid=${realAttId}&zw`;
+                  webhookData[`attachment-${attachmentIndex}-url`] = gmailUrl;
+                  console.log(`Generated Gmail URL for ${file.originalname}: ${gmailUrl}`);
+                }
+              } catch (e) {
+                console.log('Could not parse content-id-map:', e.message);
               }
-            } catch (e) {
-              console.log('Could not parse content-id-map:', e.message);
             }
           }
         }
