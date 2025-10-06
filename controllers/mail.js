@@ -5,6 +5,18 @@ const CustomError = require("../errors");
 const mailgunService = require("../services/mailgun.service");
 const mongoose = require("mongoose");
 
+// Gmail attachment URL'sini düzelt
+const fixGmailAttachmentUrl = (url) => {
+  if (!url || typeof url !== 'string') return url;
+  
+  if (url.includes('mail.google.com')) {
+    return url.replace('mail.google.com', 'mail-attachment.googleusercontent.com')
+              .replace('/mail/u/0', '/attachment/u/0/');
+  }
+  
+  return url;
+};
+
 // Mail gönderme
 const sendMail = async (req, res, next) => {
   try {
@@ -867,14 +879,16 @@ const handleMailgunWebhook = async (req, res, next) => {
         webhookData[`attachment-${attachmentIndex}-size`] = file.size.toString();
         
         // Gmail attachment URL'sini bul ve ekle
-        const attachmentUrl = webhookData[`attachment-${attachmentIndex}-url`] || 
+        let attachmentUrl = webhookData[`attachment-${attachmentIndex}-url`] || 
                              webhookData[`${file.fieldname}-url`] ||
                              webhookData[`url-${attachmentIndex}`] ||
                              null;
         
         if (attachmentUrl) {
-          webhookData[`attachment-${attachmentIndex}-url`] = attachmentUrl;
-          console.log(`Found attachment URL for ${file.originalname}: ${attachmentUrl}`);
+          // Gmail attachment URL'sini düzelt
+          const fixedUrl = fixGmailAttachmentUrl(attachmentUrl);
+          webhookData[`attachment-${attachmentIndex}-url`] = fixedUrl;
+          console.log(`Found attachment URL for ${file.originalname}: ${fixedUrl}`);
         } else {
           // Gmail attachment URL'sini content-id-map'ten çıkarmaya çalış
           const contentIdMap = webhookData['content-id-map'];
@@ -887,7 +901,7 @@ const handleMailgunWebhook = async (req, res, next) => {
                 // Gmail attachment URL formatı - Message-Id'yi encode et
                 const messageId = encodeURIComponent(webhookData['Message-Id']);
                 const realAttId = contentId.replace('<', '').replace('>', '');
-                const gmailUrl = `https://mail.google.com/mail/u/0?ui=2&ik=7ac7c89a8e&attid=0.${attachmentIndex}&permmsgid=${messageId}&th=${messageId}&view=att&disp=safe&realattid=${realAttId}&zw`;
+                const gmailUrl = `https://mail-attachment.googleusercontent.com/attachment/u/0/?ui=2&ik=7ac7c89a8e&attid=0.${attachmentIndex}&permmsgid=${messageId}&th=${messageId}&view=att&disp=safe&realattid=${realAttId}&zw`;
                 webhookData[`attachment-${attachmentIndex}-url`] = gmailUrl;
                 console.log(`Generated Gmail URL for ${file.originalname}: ${gmailUrl}`);
               }
@@ -1022,14 +1036,17 @@ const processWebhookData = async (webhookData, res) => {
           // Duplicate kontrolü - aynı filename zaten varsa ekleme
           const existingAttachment = attachments.find(att => att.filename === attachmentName);
           if (!existingAttachment) {
+            // Gmail attachment URL'sini düzelt
+            const fixedUrl = fixGmailAttachmentUrl(attachmentUrl);
+            
             attachments.push({
               filename: attachmentName,
               originalName: attachmentName,
               mimeType: attachmentType || 'application/octet-stream',
               size: attachmentSize ? parseInt(attachmentSize) : 0,
-              url: attachmentUrl || null
+              url: fixedUrl || null
             });
-            console.log(`Added attachment: ${attachmentName} with URL: ${attachmentUrl || 'null'}`);
+            console.log(`Added attachment: ${attachmentName} with URL: ${fixedUrl || 'null'}`);
           }
         }
       }
@@ -1040,12 +1057,15 @@ const processWebhookData = async (webhookData, res) => {
       console.log('Gmail attachments array:', webhookData['attachments']);
       webhookData['attachments'].forEach((attachment, index) => {
         if (attachment.filename || attachment.name) {
+          // Gmail attachment URL'sini düzelt
+          const fixedUrl = fixGmailAttachmentUrl(attachment.url);
+          
           attachments.push({
             filename: attachment.filename || attachment.name,
             originalName: attachment.filename || attachment.name,
             mimeType: attachment.contentType || attachment.mimeType || 'application/octet-stream',
             size: attachment.size || 0,
-            url: attachment.url || null
+            url: fixedUrl || null
           });
         }
       });
@@ -1063,12 +1083,15 @@ const processWebhookData = async (webhookData, res) => {
           const attachmentSize = webhookData[`${key}-size`] || webhookData[`${key}_size`];
           const attachmentType = webhookData[`${key}-content-type`] || webhookData[`${key}_content_type`];
           
+          // Gmail attachment URL'sini düzelt
+          const fixedUrl = fixGmailAttachmentUrl(attachmentUrl);
+          
           attachments.push({
             filename: attachmentName,
             originalName: attachmentName,
             mimeType: attachmentType || 'application/octet-stream',
             size: attachmentSize ? parseInt(attachmentSize) : 0,
-            url: attachmentUrl || null
+            url: fixedUrl || null
           });
         }
       }
@@ -1239,12 +1262,15 @@ const processWebhookData = async (webhookData, res) => {
             // Eğer bu attachment zaten eklenmemişse ekle
             const existingAttachment = attachments.find(att => att.filename === filename);
             if (!existingAttachment) {
+              // Gmail attachment URL'sini düzelt
+              const fixedUrl = fixGmailAttachmentUrl(url);
+              
               attachments.push({
                 filename: filename,
                 originalName: filename,
                 mimeType: mimeType,
                 size: 0, // Gmail'den gelen attachment'larda size bilgisi olmayabilir
-                url: url
+                url: fixedUrl
               });
               console.log(`Added Gmail attachment: ${filename}`);
             }
@@ -1304,12 +1330,15 @@ const processWebhookData = async (webhookData, res) => {
           // Eğer bu attachment zaten eklenmemişse ekle
           const existingAttachment = attachments.find(att => att.filename === filename);
           if (!existingAttachment) {
+            // Gmail attachment URL'sini düzelt
+            const fixedUrl = fixGmailAttachmentUrl(url);
+            
             attachments.push({
               filename: filename,
               originalName: filename,
               mimeType: mimeType,
               size: 0, // Mail sağlayıcılarından gelen attachment'larda size bilgisi olmayabilir
-              url: url
+              url: fixedUrl
             });
           }
         }
@@ -1573,6 +1602,43 @@ const manualCleanupTrash = async (req, res, next) => {
   }
 };
 
+// Gmail attachment URL'lerini düzelt
+const fixGmailAttachmentUrls = async (req, res, next) => {
+  try {
+    const userId = req.user.userId;
+    
+    // Kullanıcının tüm maillerini bul
+    const mails = await Mail.find({ user: userId });
+    let fixedCount = 0;
+    
+    for (const mail of mails) {
+      if (mail.attachments && Array.isArray(mail.attachments)) {
+        let hasChanges = false;
+        
+        for (const attachment of mail.attachments) {
+          if (attachment.url && attachment.url.includes('mail.google.com')) {
+            attachment.url = fixGmailAttachmentUrl(attachment.url);
+            hasChanges = true;
+            fixedCount++;
+          }
+        }
+        
+        if (hasChanges) {
+          await mail.save();
+        }
+      }
+    }
+    
+    res.status(StatusCodes.OK).json({
+      success: true,
+      message: `${fixedCount} Gmail attachment URL'si düzeltildi`,
+      fixedCount
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // Add Reply to Mail
 const addReplyToMail = async (req, res, next) => {
   try {
@@ -1663,5 +1729,6 @@ module.exports = {
   handleMailgunWebhook,
   cleanupTrashMails,
   manualCleanupTrash,
+  fixGmailAttachmentUrls,
   testWebhook
 };

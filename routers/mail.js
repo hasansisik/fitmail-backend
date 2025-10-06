@@ -25,7 +25,8 @@ const {
   testWebhook,
   handleMailgunWebhook,
   cleanupTrashMails,
-  manualCleanupTrash
+  manualCleanupTrash,
+  fixGmailAttachmentUrls
 } = require('../controllers/mail');
 const { isAuthenticated } = require('../middleware/authMiddleware');
 
@@ -116,5 +117,8 @@ router.post('/test-webhook', express.json(), testWebhook);
 
 // Çöp kutusu temizleme endpoint'i
 router.post('/cleanup-trash', isAuthenticated, manualCleanupTrash);
+
+// Gmail attachment URL'lerini düzelt
+router.post('/fix-gmail-urls', isAuthenticated, fixGmailAttachmentUrls);
 
 module.exports = router;
