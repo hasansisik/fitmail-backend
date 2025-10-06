@@ -199,28 +199,12 @@ const getInbox = async (req, res, next) => {
 
     res.status(StatusCodes.OK).json({
       success: true,
-      data: {
-        mails: formattedMails,
-        pagination: {
-          currentPage: parseInt(page),
-          totalPages: Math.ceil(total / limit),
-          totalItems: total,
-          itemsPerPage: parseInt(limit),
-          hasNextPage: parseInt(page) < Math.ceil(total / limit),
-          hasPrevPage: parseInt(page) > 1
-        },
-        filters: {
-          folder,
-          search: search || null,
-          label: label || null,
-          isRead: isRead !== undefined ? isRead === 'true' : null
-        },
-        summary: {
-          totalMails: total,
-          unreadCount: await Mail.countDocuments({ ...filter, isRead: false }),
-          importantCount: await Mail.countDocuments({ ...filter, isImportant: true }),
-          starredCount: await Mail.countDocuments({ ...filter, isStarred: true })
-        }
+      mails,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(total / limit),
+        totalItems: total,
+        itemsPerPage: parseInt(limit)
       }
     });
   } catch (error) {
@@ -464,74 +448,15 @@ const getMailsByCategory = async (req, res, next) => {
 
     const total = await Mail.countDocuments(filter);
 
-    // Format mails for better frontend consumption
-    const formattedMails = mails.map(mail => ({
-      _id: mail._id,
-      from: {
-        name: mail.from?.name || 'Bilinmeyen',
-        email: mail.from?.email || ''
-      },
-      to: mail.to || [],
-      cc: mail.cc || [],
-      bcc: mail.bcc || [],
-      subject: mail.subject || 'Konu yok',
-      content: mail.content || '',
-      htmlContent: mail.htmlContent || mail.content || '',
-      attachments: (mail.attachments || []).map(att => ({
-        filename: att.filename || 'Dosya',
-        originalName: att.originalName || att.filename || 'Dosya',
-        mimeType: att.mimeType || att.contentType || 'application/octet-stream',
-        contentType: att.contentType || att.mimeType || 'application/octet-stream',
-        type: att.type || 'file',
-        size: att.size || 0,
-        url: fixGmailAttachmentUrl(att.url) || null
-      })),
-      labels: mail.labels || [],
-      categories: mail.categories || [],
-      folder: mail.folder || 'inbox',
-      isRead: mail.isRead || false,
-      isStarred: mail.isStarred || false,
-      isImportant: mail.isImportant || false,
-      receivedAt: mail.receivedAt || mail.createdAt,
-      createdAt: mail.createdAt,
-      updatedAt: mail.updatedAt,
-      conversation: mail.conversation || [],
-      status: mail.status || 'received',
-      mailgunId: mail.mailgunId || '',
-      messageId: mail.messageId || '',
-      references: mail.references || [],
-      user: {
-        _id: mail.user?._id || userId,
-        name: mail.user?.name || '',
-        surname: mail.user?.surname || '',
-        mailAddress: mail.user?.mailAddress || ''
-      }
-    }));
-
     res.status(StatusCodes.OK).json({
       success: true,
-      data: {
-        mails: formattedMails,
-        category,
-        pagination: {
-          currentPage: parseInt(page),
-          totalPages: Math.ceil(total / limit),
-          totalItems: total,
-          itemsPerPage: parseInt(limit),
-          hasNextPage: parseInt(page) < Math.ceil(total / limit),
-          hasPrevPage: parseInt(page) > 1
-        },
-        filters: {
-          category,
-          search: search || null,
-          isRead: isRead !== undefined ? isRead === 'true' : null
-        },
-        summary: {
-          totalMails: total,
-          unreadCount: await Mail.countDocuments({ ...filter, isRead: false }),
-          importantCount: await Mail.countDocuments({ ...filter, isImportant: true }),
-          starredCount: await Mail.countDocuments({ ...filter, isStarred: true })
-        }
+      mails,
+      category,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(total / limit),
+        totalItems: total,
+        itemsPerPage: parseInt(limit)
       }
     });
   } catch (error) {
