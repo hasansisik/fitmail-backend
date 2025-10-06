@@ -866,6 +866,35 @@ const handleMailgunWebhook = async (req, res, next) => {
         webhookData[`attachment-${attachmentIndex}-content-type`] = file.mimetype;
         webhookData[`attachment-${attachmentIndex}-size`] = file.size.toString();
         
+        // Gmail attachment URL'sini bul ve ekle
+        const attachmentUrl = webhookData[`attachment-${attachmentIndex}-url`] || 
+                             webhookData[`${file.fieldname}-url`] ||
+                             webhookData[`url-${attachmentIndex}`] ||
+                             null;
+        
+        if (attachmentUrl) {
+          webhookData[`attachment-${attachmentIndex}-url`] = attachmentUrl;
+          console.log(`Found attachment URL for ${file.originalname}: ${attachmentUrl}`);
+        } else {
+          // Gmail attachment URL'sini content-id-map'ten çıkarmaya çalış
+          const contentIdMap = webhookData['content-id-map'];
+          if (contentIdMap) {
+            try {
+              const idMap = JSON.parse(contentIdMap);
+              const contentIds = Object.keys(idMap);
+              if (contentIds.length > index) {
+                const contentId = contentIds[index];
+                // Gmail attachment URL formatı
+                const gmailUrl = `https://mail.google.com/mail/u/0?ui=2&ik=7ac7c89a8e&attid=0.${attachmentIndex}&permmsgid=${webhookData['Message-Id']}&th=${webhookData['Message-Id']}&view=att&disp=safe&realattid=${contentId.replace('<', '').replace('>', '')}&zw`;
+                webhookData[`attachment-${attachmentIndex}-url`] = gmailUrl;
+                console.log(`Generated Gmail URL for ${file.originalname}: ${gmailUrl}`);
+              }
+            } catch (e) {
+              console.log('Could not parse content-id-map:', e.message);
+            }
+          }
+        }
+        
         // Eğer fieldname attachment içeriyorsa, o field'ı da ekle
         if (file.fieldname.includes('attachment')) {
           webhookData[file.fieldname] = file.originalname;
@@ -998,6 +1027,7 @@ const processWebhookData = async (webhookData, res) => {
               size: attachmentSize ? parseInt(attachmentSize) : 0,
               url: attachmentUrl || null
             });
+            console.log(`Added attachment: ${attachmentName} with URL: ${attachmentUrl || 'null'}`);
           }
         }
       }
