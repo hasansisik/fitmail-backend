@@ -1199,9 +1199,8 @@ const processWebhookData = async (webhookData, res) => {
             }
           }
         });
-      }
-
-      gmailAttachmentKeys.forEach(key => {
+        
+        gmailAttachmentKeys.forEach(key => {
         const value = webhookData[key];
         console.log(`Checking Gmail key: ${key} = ${value}`);
 
@@ -1277,6 +1276,7 @@ const processWebhookData = async (webhookData, res) => {
           }
         }
       });
+      }
     }
 
     // Tüm mail sağlayıcılarının özel attachment formatlarını kontrol et (sadece multer işlemediyse)
