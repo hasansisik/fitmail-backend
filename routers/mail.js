@@ -42,7 +42,8 @@ const upload = multer({
 const router = express.Router();
 
 // Mailgun webhook - gelen mailleri almak için (authentication yok!)
-router.post('/webhook', express.json(), handleMailgunWebhook);
+// multipart/form-data ve application/x-www-form-urlencoded formatlarını destekle
+router.post('/webhook', express.urlencoded({ extended: true }), handleMailgunWebhook);
 
 // Mail gönderme
 router.post('/send', isAuthenticated, upload.array('attachments', 5), sendMail);
