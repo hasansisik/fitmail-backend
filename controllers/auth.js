@@ -52,7 +52,7 @@ const register = async (req, res, next) => {
     // Create Profile document
     const profile = new Profile({
       picture:
-        picture || "https://res-console.cloudinary.com/da2qwsrbv/thumbnails/v1/image/upload/v1759628524/RWtyYW5fUmVzbWlfMjAyNS0xMC0wNV8wNC40MC4yNl9jcG9rdHo=/drilldown",
+        picture || "https://res.cloudinary.com/da2qwsrbv/image/upload/v1759932330/F_punfds.png",
     });
     await profile.save();
 
@@ -223,7 +223,7 @@ const login = async (req, res, next) => {
         email: user.email,
         picture:
           user.profile?.picture ||
-          "https://res-console.cloudinary.com/da2qwsrbv/thumbnails/v1/image/upload/v1759628524/RWtyYW5fUmVzbWlfMjAyNS0xMC0wNV8wNC40MC4yNl9jcG9rdHo=/drilldown",
+          "https://res.cloudinary.com/da2qwsrbv/image/upload/v1759932330/F_punfds.png",
         status: user.status,
         courseTrial: user.courseTrial,
         theme: user.theme,
@@ -905,7 +905,7 @@ const googleAuth = async (req, res, next) => {
 
       // Create Profile document
       const profile = new Profile({
-        picture: "https://res-console.cloudinary.com/da2qwsrbv/thumbnails/v1/image/upload/v1759628524/RWtyYW5fUmVzbWlfMjAyNS0xMC0wNV8wNC40MC4yNl9jcG9rdHo=/drilldown",
+        picture: "https://res.cloudinary.com/da2qwsrbv/image/upload/v1759932330/F_punfds.png",
       });
       await profile.save();
 
@@ -999,7 +999,7 @@ const googleAuth = async (req, res, next) => {
         name: user.name,
         surname: user.surname,
         email: user.email,
-        picture: user.profile?.picture || picture || "https://res-console.cloudinary.com/da2qwsrbv/thumbnails/v1/image/upload/v1759628524/RWtyYW5fUmVzbWlfMjAyNS0xMC0wNV8wNC40MC4yNl9jcG9rdHo=/drilldown",
+        picture: user.profile?.picture || picture || "https://res.cloudinary.com/da2qwsrbv/image/upload/v1759932330/F_punfds.png",
         status: user.status,
         courseTrial: user.courseTrial,
         theme: user.theme,
@@ -1076,7 +1076,7 @@ const googleLogin = async (req, res, next) => {
         name: user.name,
         surname: user.surname,
         email: user.email,
-        picture: user.profile?.picture || picture || "https://res-console.cloudinary.com/da2qwsrbv/thumbnails/v1/image/upload/v1759628524/RWtyYW5fUmVzbWlfMjAyNS0xMC0wNV8wNC40MC4yNl9jcG9rdHo=/drilldown",
+        picture: user.profile?.picture || picture || "https://res.cloudinary.com/da2qwsrbv/image/upload/v1759932330/F_punfds.png",
         status: user.status,
         courseTrial: user.courseTrial,
         theme: user.theme,
@@ -1115,7 +1115,7 @@ const googleRegister = async (req, res, next) => {
 
     // Create Profile document
     const profile = new Profile({
-      picture: picture || "https://res-console.cloudinary.com/da2qwsrbv/thumbnails/v1/image/upload/v1759628524/RWtyYW5fUmVzbWlfMjAyNS0xMC0wNV8wNC40MC4yNl9jcG9rdHo=/drilldown",
+      picture: picture || "https://res.cloudinary.com/da2qwsrbv/image/upload/v1759932330/F_punfds.png",
     });
     await profile.save();
 
