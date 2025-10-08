@@ -17,6 +17,7 @@ const AuthSchema = new mongoose.Schema({
   verificationCode: { type: Number},
   passwordToken: { type: String, select: false },
   passwordTokenExpirationDate: { type: Date, select: false },
+  passwordChangedAt: { type: Date, default: Date.now },
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
 });
 

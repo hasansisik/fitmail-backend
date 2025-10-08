@@ -243,7 +243,11 @@ const getMyProfile = async (req, res, next) => {
   try {
     const user = await User.findById(req.user.userId)
       .populate("profile")
-      .populate("address");
+      .populate("address")
+      .populate({
+        path: "auth",
+        select: "passwordChangedAt"
+      });
 
     if (!user) {
       return res.status(401).json({
@@ -434,6 +438,7 @@ const resetPassword = async (req, res) => {
         user.auth.password = newPassword;
         user.auth.passwordToken = null;
         user.auth.passwordTokenExpirationDate = null;
+        user.auth.passwordChangedAt = new Date();
         await user.auth.save();
         res.json({
           message: "Şifre başarıyla sıfırlandı.",
@@ -538,6 +543,7 @@ const editProfile = async (req, res) => {
     // Handle password
     if (req.body.password) {
       user.auth.password = req.body.password;
+      user.auth.passwordChangedAt = new Date();
       await user.auth.save();
     }
 
@@ -724,6 +730,7 @@ const changePassword = async (req, res, next) => {
 
     // Update password
     user.auth.password = newPassword;
+    user.auth.passwordChangedAt = new Date();
     await user.auth.save();
 
     res.json({
