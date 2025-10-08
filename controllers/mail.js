@@ -550,7 +550,8 @@ const getMailStats = async (req, res, next) => {
           unread: { $sum: { $cond: [{ $eq: ['$isRead', false] }, 1, 0] } },
           // Okunmamış mail sayıları - sadece okunmamış mailleri say
           inbox: { $sum: { $cond: [{ $and: [{ $eq: ['$folder', 'inbox'] }, { $eq: ['$isRead', false] }] }, 1, 0] } },
-          sent: { $sum: { $cond: [{ $and: [{ $eq: ['$folder', 'sent'] }, { $eq: ['$isRead', false] }] }, 1, 0] } },
+          // Gönderilen kutusu için toplam sayı (okunmamış değil)
+          sent: { $sum: { $cond: [{ $eq: ['$folder', 'sent'] }, 1, 0] } },
           drafts: { $sum: { $cond: [{ $and: [{ $eq: ['$folder', 'drafts'] }, { $eq: ['$isRead', false] }] }, 1, 0] } },
           spam: { $sum: { $cond: [{ $and: [{ $eq: ['$folder', 'spam'] }, { $eq: ['$isRead', false] }] }, 1, 0] } },
           trash: { $sum: { $cond: [{ $and: [{ $eq: ['$folder', 'trash'] }, { $eq: ['$isRead', false] }] }, 1, 0] } },
@@ -1757,11 +1758,41 @@ const addReplyToMail = async (req, res, next) => {
 
     await originalMail.addReply(replyData);
 
+    // Cevap için yeni bir mail objesi oluştur (gönderilen kutusuna düşmesi için)
+    const replySubject = originalMail.subject.startsWith('Re:') ? originalMail.subject : `Re: ${originalMail.subject}`;
+    const replyMailData = {
+      from: {
+        email: user.mailAddress,
+        name: `${user.name} ${user.surname}`
+      },
+      to: [{
+        email: originalMail.from.email,
+        name: originalMail.from.name
+      }],
+      cc: originalMail.cc || [],
+      bcc: originalMail.bcc || [],
+      subject: replySubject,
+      content: content,
+      htmlContent: content.replace(/\n/g, '<br>'),
+      folder: 'sent',
+      status: 'draft', // Draft olarak başla, gönderim başarılı olursa 'sent' olacak
+      labels: originalMail.labels || [],
+      attachments: attachments || [],
+      user: userId,
+      inReplyTo: originalMail.messageId || originalMail._id.toString(),
+      references: originalMail.references ? [...originalMail.references, originalMail.messageId || originalMail._id.toString()] : [originalMail.messageId || originalMail._id.toString()]
+    };
+
+    // Cevap mail'ini veritabanına kaydet
+    const replyMail = new Mail(replyMailData);
+    await replyMail.save();
+    console.log("Reply mail saved to database with ID:", replyMail._id);
+
     // Mailgun ile cevabı gönder
     const mailgunData = {
       from: `${user.name} ${user.surname} <${user.mailAddress}>`,
       to: originalMail.from.email,
-      subject: originalMail.subject.startsWith('Re:') ? originalMail.subject : `Re: ${originalMail.subject}`,
+      subject: replySubject,
       text: content,
       html: content.replace(/\n/g, '<br>'),
       attachments: attachments || []
@@ -1772,18 +1803,49 @@ const addReplyToMail = async (req, res, next) => {
     console.log("Mailgun result for reply:", mailgunResult);
     
     if (mailgunResult.success) {
+      // Cevap mail durumunu güncelle
+      replyMail.status = 'sent';
+      replyMail.messageId = mailgunResult.messageId;
+      replyMail.mailgunId = mailgunResult.messageId;
+      replyMail.mailgunResponse = mailgunResult.response;
+      await replyMail.save();
+      console.log("Reply mail status updated to 'sent' for ID:", replyMail._id);
+
+      // Kullanıcının mail listesine ekle
+      user.mails.push(replyMail._id);
+      await user.save();
+      console.log("Reply mail added to user's mail list. User ID:", userId);
+
       res.status(StatusCodes.OK).json({
         success: true,
         message: "Cevap başarıyla gönderildi ve mail'e eklendi",
         mail: originalMail,
+        replyMail: {
+          _id: replyMail._id,
+          subject: replyMail.subject,
+          to: replyMail.to,
+          status: replyMail.status,
+          folder: replyMail.folder,
+          sentAt: replyMail.sentAt
+        },
         mailgunResult: mailgunResult
       });
     } else {
-      // Mailgun hatası olsa bile cevap mail'e eklendi
+      // Gönderim başarısız
+      replyMail.status = 'failed';
+      await replyMail.save();
+
       res.status(StatusCodes.OK).json({
         success: true,
         message: "Cevap mail'e eklendi ancak gönderimde hata oluştu",
         mail: originalMail,
+        replyMail: {
+          _id: replyMail._id,
+          subject: replyMail.subject,
+          to: replyMail.to,
+          status: replyMail.status,
+          folder: replyMail.folder
+        },
         mailgunError: mailgunResult.error
       });
     }
