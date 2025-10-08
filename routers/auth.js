@@ -1,5 +1,5 @@
 const express = require('express');
-const {register,googleRegister,googleAuth,login,googleLogin,getMyProfile,getAllUsers,logout,forgotPassword,resetPassword,verifyEmail,againEmail,editProfile,verifyPassword,changePassword,updateSettings,deleteAccount,deleteUser,updateUserRole,updateUserStatus,checkEmailAvailability} = require('../controllers/auth');
+const {register,googleRegister,googleAuth,login,googleLogin,getMyProfile,getAllUsers,logout,forgotPassword,resetPassword,verifyEmail,againEmail,editProfile,verifyPassword,changePassword,updateSettings,deleteAccount,deleteUser,updateUserRole,updateUserStatus,checkEmailAvailability,checkPremiumCode} = require('../controllers/auth');
 const {isAuthenticated, isAdmin} = require('../middleware/authMiddleware');
 
 const router = express.Router();
@@ -10,6 +10,7 @@ router.post('/google-auth',googleAuth);
 router.post('/login',login);
 router.post('/google-login',googleLogin);
 router.post('/check-email', checkEmailAvailability);
+router.post('/check-premium-code', checkPremiumCode);
 router.get("/me", isAuthenticated, getMyProfile);
 router.get('/logout',isAuthenticated,logout);
 router.post('/forgot-password', forgotPassword);

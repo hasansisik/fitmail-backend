@@ -21,7 +21,8 @@ const register = async (req, res, next) => {
       expoPushToken,
       age,
       birthDate,
-      gender
+      gender,
+      premiumCode
     } = req.body;
 
     //check email
@@ -41,6 +42,24 @@ const register = async (req, res, next) => {
     // Recovery email is now required
     if (!recoveryEmail) {
       throw new CustomError.BadRequestError("Kurtarıcı e-posta adresi gereklidir.");
+    }
+
+    // Check if domain is premium and validate premium code
+    const Premium = require('../models/Premium');
+    const premiumDomain = await Premium.findOne({ 
+      name: email,
+      isActive: true 
+    });
+
+    if (premiumDomain) {
+      if (!premiumCode) {
+        throw new CustomError.BadRequestError("Bu domain premium bir domaindir. Premium kod gereklidir.");
+      }
+      
+      // Validate premium code
+      if (premiumCode !== premiumDomain.code) {
+        throw new CustomError.BadRequestError("Geçersiz premium kod.");
+      }
     }
 
     // Create Auth document
@@ -1348,10 +1367,55 @@ const checkEmailAvailability = async (req, res, next) => {
       });
     }
 
+    // Check if domain is premium
+    const Premium = require('../models/Premium');
+    const premiumDomain = await Premium.findOne({ 
+      name: email,
+      isActive: true 
+    });
+
     res.status(200).json({
       success: true,
       available: true,
-      message: "E-posta adresi kullanılabilir"
+      message: premiumDomain ? "Bu domain premium bir domaindir" : "E-posta adresi kullanılabilir",
+      isPremium: !!premiumDomain
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+//Check Premium Code
+const checkPremiumCode = async (req, res, next) => {
+  try {
+    const { email, code } = req.body;
+
+    if (!email || !code) {
+      throw new CustomError.BadRequestError("E-posta adresi ve kod gereklidir");
+    }
+
+    // Check if domain is premium
+    const Premium = require('../models/Premium');
+    const premiumDomain = await Premium.findOne({ 
+      name: email,
+      isActive: true 
+    });
+
+    if (!premiumDomain) {
+      return res.status(200).json({
+        success: true,
+        valid: false,
+        message: "Hatalı kod"
+      });
+    }
+
+    // Check if code matches
+    const isValid = code === premiumDomain.code;
+
+    res.status(200).json({
+      success: true,
+      valid: isValid,
+      message: isValid ? "Premium kod doğru" : "Premium kod yanlış"
     });
   } catch (error) {
     next(error);
@@ -1380,4 +1444,5 @@ module.exports = {
   updateUserRole,
   updateUserStatus,
   checkEmailAvailability,
+  checkPremiumCode,
 };
