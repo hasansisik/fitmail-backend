@@ -65,6 +65,8 @@ app.options('*', cors({
         'https://gozdedijital-nextjs.vercel.app',
         'https://gozdedijital.xyz',
         'https://www.gozdedijital.xyz',
+        'https://account.gozdedijital.xyz',
+        'https://panel.gozdedijital.xyz',
     ],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
