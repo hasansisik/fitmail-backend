@@ -27,20 +27,31 @@ const notFoundMiddleware = require('./middleware/not-found')
 const erorHandlerMiddleware = require('./middleware/eror-handler')
 
 app.use(cors({
-    origin: [
-        'http://localhost:3000',
-        'http://account.localhost:3000',
-        'http://panel.localhost:3000',
-        'https://fitmail-nextjs.vercel.app',
-        'https://fitmail.vercel.app',
-        'https://fitmail-nextjs.vercel.app',
-        'https://gozdedijital.vercel.app',
-        'https://gozdedijital-nextjs.vercel.app',
-        'https://gozdedijital.xyz',
-        'https://www.gozdedijital.xyz',
-        'https://account.gozdedijital.xyz',
-        'https://panel.gozdedijital.xyz',
-    ],
+    origin: function (origin, callback) {
+        // Allow requests with no origin (like mobile apps or curl requests)
+        if (!origin) return callback(null, true);
+        
+        const allowedOrigins = [
+            'http://localhost:3000',
+            'http://account.localhost:3000',
+            'http://panel.localhost:3000',
+            'https://fitmail-nextjs.vercel.app',
+            'https://fitmail.vercel.app',
+            'https://fitmail-nextjs.vercel.app',
+            'https://gozdedijital.vercel.app',
+            'https://gozdedijital-nextjs.vercel.app',
+            'https://gozdedijital.xyz',
+            'https://www.gozdedijital.xyz',
+            'https://account.gozdedijital.xyz',
+            'https://panel.gozdedijital.xyz',
+        ];
+        
+        if (allowedOrigins.indexOf(origin) !== -1) {
+            callback(null, true);
+        } else {
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: [
@@ -57,17 +68,31 @@ app.use(cors({
 
 // For preflight OPTIONS requests
 app.options('*', cors({
-    origin: [
-        'http://localhost:3000',
-        'http://account.localhost:3000',
-        'http://panel.localhost:3000',
-        'https://gozdedijital.vercel.app',
-        'https://gozdedijital-nextjs.vercel.app',
-        'https://gozdedijital.xyz',
-        'https://www.gozdedijital.xyz',
-        'https://account.gozdedijital.xyz',
-        'https://panel.gozdedijital.xyz',
-    ],
+    origin: function (origin, callback) {
+        // Allow requests with no origin (like mobile apps or curl requests)
+        if (!origin) return callback(null, true);
+        
+        const allowedOrigins = [
+            'http://localhost:3000',
+            'http://account.localhost:3000',
+            'http://panel.localhost:3000',
+            'https://fitmail-nextjs.vercel.app',
+            'https://fitmail.vercel.app',
+            'https://fitmail-nextjs.vercel.app',
+            'https://gozdedijital.vercel.app',
+            'https://gozdedijital-nextjs.vercel.app',
+            'https://gozdedijital.xyz',
+            'https://www.gozdedijital.xyz',
+            'https://account.gozdedijital.xyz',
+            'https://panel.gozdedijital.xyz',
+        ];
+        
+        if (allowedOrigins.indexOf(origin) !== -1) {
+            callback(null, true);
+        } else {
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: [
@@ -80,6 +105,14 @@ app.options('*', cors({
         'X-Requested-With'
     ]
 }));
+
+// Add headers to prevent CORS caching issues
+app.use((req, res, next) => {
+    res.header('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.header('Pragma', 'no-cache');
+    res.header('Expires', '0');
+    next();
+});
 
 app.use(helmet());
 app.use(mongoSanitize());
