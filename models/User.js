@@ -42,9 +42,11 @@ const ProfileSchema = new mongoose.Schema({
     type: String,
     validate: {
       validator: function (v) {
-        return /^(\+90|0)?5\d{9}$/.test(v);
+        if (!v || v.trim() === '') return true; // Allow empty values
+        // More flexible phone number validation
+        return /^(\+90|0)?[5][0-9]{9}$/.test(v.replace(/\s/g, ''));
       },
-      message: (props) => `${props.value} is not a valid phone number!`,
+      message: (props) => `${props.value} geçerli bir telefon numarası değil!`,
     },
   },
   picture: {

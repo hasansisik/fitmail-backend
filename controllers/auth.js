@@ -483,6 +483,8 @@ const resetPassword = async (req, res) => {
 //Edit Profile
 const editProfile = async (req, res) => {
   try {
+    console.log('EditProfile request body:', JSON.stringify(req.body, null, 2));
+    
     const updates = Object.keys(req.body);
     const allowedUpdates = [
       "name",
@@ -501,15 +503,18 @@ const editProfile = async (req, res) => {
       "skills",
       "theme",
       "mailAddress",
+      "phoneNumber",
     ];
     const isValidOperation = updates.every((update) =>
       allowedUpdates.includes(update)
     );
 
     if (!isValidOperation) {
+      console.log('Invalid operation. Updates:', updates);
+      console.log('Allowed updates:', allowedUpdates);
       return res
         .status(400)
-        .send({ error: "Sistem hatası oluştu. Lütfen tekrar deneyin" });
+        .json({ message: "Geçersiz alan güncellemesi" });
     }
 
     const user = await User.findById(req.user.userId)
@@ -612,6 +617,21 @@ const editProfile = async (req, res) => {
       }
     }
 
+    // Handle phoneNumber
+    if (req.body.phoneNumber !== undefined) {
+      if (!user.profile) {
+        const profile = new Profile({
+          phoneNumber: req.body.phoneNumber,
+          user: user._id,
+        });
+        await profile.save();
+        user.profile = profile._id;
+      } else {
+        user.profile.phoneNumber = req.body.phoneNumber;
+        await user.profile.save();
+      }
+    }
+
     // Handle address
     if (req.body.address) {
       // Check if address is an object with the expected fields
@@ -658,6 +678,24 @@ const editProfile = async (req, res) => {
     });
   } catch (err) {
     console.error(err);
+    
+    // Handle validation errors
+    if (err.name === 'ValidationError') {
+      const errors = Object.values(err.errors).map((e) => e.message);
+      return res.status(400).json({
+        message: "Doğrulama hatası",
+        errors: errors
+      });
+    }
+    
+    // Handle duplicate key errors
+    if (err.code === 11000) {
+      return res.status(400).json({
+        message: "Bu bilgi zaten kullanılıyor"
+      });
+    }
+    
+    // Handle other errors
     res.status(500).json({
       message: "Sistem hatası oluştu. Lütfen tekrar deneyin",
     });
