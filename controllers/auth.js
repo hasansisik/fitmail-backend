@@ -394,7 +394,57 @@ const logout = async (req, res, next) => {
   }
 };
 
-//Forgot Password
+//Verify Recovery Email - Step 1 of password reset
+const verifyRecoveryEmail = async (req, res) => {
+  const { email, recoveryEmailHint } = req.body;
+
+  if (!email) {
+    throw new CustomError.BadRequestError("Lütfen e-posta adresinizi girin.");
+  }
+
+  const user = await User.findOne({ email });
+
+  if (!user) {
+    throw new CustomError.BadRequestError("Kullanıcı bulunamadı.");
+  }
+
+  // Check if user has a recovery email
+  if (!user.recoveryEmail) {
+    throw new CustomError.BadRequestError("Bu hesap için kurtarıcı e-posta adresi bulunamadı. Lütfen destek ile iletişime geçin.");
+  }
+
+  // If recovery email hint is provided, verify it
+  if (recoveryEmailHint) {
+    const recoveryEmail = user.recoveryEmail.toLowerCase();
+    const hint = recoveryEmailHint.toLowerCase().trim();
+    
+    // Check if hint matches the start of recovery email or domain
+    const emailParts = recoveryEmail.split('@');
+    const localPart = emailParts[0];
+    const domain = emailParts[1];
+    
+    // User must provide at least first 3 characters of email or full domain
+    const isValid = 
+      localPart.startsWith(hint) || 
+      domain === hint || 
+      domain.startsWith(hint) ||
+      recoveryEmail.includes(hint);
+    
+    if (!isValid) {
+      throw new CustomError.BadRequestError("Kurtarıcı e-posta adresi doğrulanamadı.");
+    }
+  }
+
+  // Return masked recovery email for verification
+  const maskedEmail = maskEmail(user.recoveryEmail);
+  
+  res.status(StatusCodes.OK).json({
+    message: "Kurtarıcı e-posta adresi bulundu.",
+    recoveryEmailMask: maskedEmail,
+  });
+};
+
+//Forgot Password - Step 2 of password reset (after recovery email verification)
 const forgotPassword = async (req, res) => {
   const { email } = req.body;
 
@@ -410,7 +460,20 @@ const forgotPassword = async (req, res) => {
       throw new CustomError.BadRequestError("Bu hesap için kurtarıcı e-posta adresi bulunamadı. Lütfen destek ile iletişime geçin.");
     }
 
-    const passwordToken = Math.floor(1000 + Math.random() * 9000);
+    // Check rate limiting - prevent sending code more than once per minute
+    if (user.auth.passwordTokenExpirationDate) {
+      const lastRequestTime = new Date(user.auth.passwordTokenExpirationDate).getTime() - (10 * 60 * 1000); // Subtract 10 minutes to get original request time
+      const now = Date.now();
+      const oneMinute = 60 * 1000;
+      
+      if (now - lastRequestTime < oneMinute) {
+        const waitTime = Math.ceil((oneMinute - (now - lastRequestTime)) / 1000);
+        throw new CustomError.BadRequestError(`Lütfen ${waitTime} saniye bekleyip tekrar deneyin.`);
+      }
+    }
+
+    // Generate 6-digit numeric code (100000 to 999999)
+    const passwordToken = Math.floor(100000 + Math.random() * 900000);
 
     // Send password reset email to recovery email instead of user's email
     await sendResetPasswordEmail({
@@ -419,10 +482,11 @@ const forgotPassword = async (req, res) => {
       passwordToken: passwordToken,
     });
 
+    // Set expiration to 10 minutes
     const tenMinutes = 1000 * 60 * 10;
     const passwordTokenExpirationDate = new Date(Date.now() + tenMinutes);
 
-    user.auth.passwordToken = passwordToken;
+    user.auth.passwordToken = passwordToken.toString();
     user.auth.passwordTokenExpirationDate = passwordTokenExpirationDate;
 
     await user.auth.save();
@@ -431,9 +495,17 @@ const forgotPassword = async (req, res) => {
   }
 
   res.status(StatusCodes.OK).json({
-    message: "Şifre sıfırlama kodu kurtarıcı e-posta adresinize gönderildi.",
+    message: "Şifre sıfırlama kodu kurtarıcı e-posta adresinize gönderildi. Kod 10 dakika geçerlidir.",
   });
 };
+
+// Helper function to mask email
+function maskEmail(email) {
+  const [localPart, domain] = email.split('@');
+  const visibleChars = Math.min(3, Math.floor(localPart.length / 2));
+  const maskedLocal = localPart.substring(0, visibleChars) + '*'.repeat(localPart.length - visibleChars);
+  return `${maskedLocal}@${domain}`;
+}
 
 //Reset Password
 const resetPassword = async (req, res) => {
@@ -1473,6 +1545,7 @@ module.exports = {
   login,
   googleLogin,
   logout,
+  verifyRecoveryEmail,
   forgotPassword,
   resetPassword,
   verifyEmail,
