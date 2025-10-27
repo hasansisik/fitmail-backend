@@ -689,6 +689,56 @@ const getMailsByLabelCategory = async (req, res, next) => {
   }
 };
 
+// Yıldızlı mailleri getir
+const getStarredMails = async (req, res, next) => {
+  try {
+    const userId = req.user.userId;
+    const { page = 1, limit = 20, search, isRead } = req.query;
+
+    const filter = {
+      user: userId,
+      isStarred: true,
+      folder: { $ne: 'trash' } // Çöp kutusundaki yıldızlı mailleri gösterme
+    };
+
+    if (search) {
+      filter.$or = [
+        { subject: { $regex: search, $options: 'i' } },
+        { content: { $regex: search, $options: 'i' } },
+        { 'from.name': { $regex: search, $options: 'i' } },
+        { 'from.email': { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    if (isRead !== undefined) {
+      filter.isRead = isRead === 'true';
+    }
+
+    const skip = (page - 1) * limit;
+
+    const mails = await Mail.find(filter)
+      .populate('user', 'name surname mailAddress')
+      .sort({ receivedAt: -1, createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    const total = await Mail.countDocuments(filter);
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      mails,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(total / limit),
+        totalItems: total,
+        itemsPerPage: parseInt(limit)
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // Mail istatistikleri
 const getMailStats = async (req, res, next) => {
   try {
@@ -719,6 +769,8 @@ const getMailStats = async (req, res, next) => {
           spam: { $sum: { $cond: [{ $and: [{ $eq: ['$folder', 'spam'] }, { $eq: ['$isRead', false] }] }, 1, 0] } },
           trash: { $sum: { $cond: [{ $and: [{ $eq: ['$folder', 'trash'] }, { $eq: ['$isRead', false] }] }, 1, 0] } },
           archive: { $sum: { $cond: [{ $and: [{ $eq: ['$folder', 'archive'] }, { $eq: ['$isRead', false] }] }, 1, 0] } },
+          // Yıldızlı maillerin toplam sayısı (çöp kutusundakiler hariç)
+          starred: { $sum: { $cond: [{ $and: [{ $eq: ['$isStarred', true] }, { $ne: ['$folder', 'trash'] }] }, 1, 0] } },
           // Kategori okunmamış sayıları - sadece okunmamış mailleri say
           social: { $sum: { $cond: [{ $and: [{ $in: ['social', { $ifNull: ['$categories', []] }] }, { $eq: ['$isRead', false] }] }, 1, 0] } },
           updates: { $sum: { $cond: [{ $and: [{ $in: ['updates', { $ifNull: ['$categories', []] }] }, { $eq: ['$isRead', false] }] }, 1, 0] } },
@@ -738,6 +790,7 @@ const getMailStats = async (req, res, next) => {
       spam: 0,
       trash: 0,
       archive: 0,
+      starred: 0,
       social: 0,
       updates: 0,
       forums: 0,
@@ -2031,6 +2084,7 @@ module.exports = {
   removeFromCategory,
   getMailsByCategory,
   getMailsByLabelCategory,
+  getStarredMails,
   getMailStats,
   markMailAsImportant,
   markMailAsStarred,

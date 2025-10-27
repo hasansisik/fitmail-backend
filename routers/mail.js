@@ -14,6 +14,7 @@ const {
   removeFromCategory,
   getMailsByCategory,
   getMailsByLabelCategory,
+  getStarredMails,
   getMailStats,
   markMailAsImportant,
   markMailAsStarred,
@@ -87,6 +88,9 @@ router.get('/category/:category', isAuthenticated, getMailsByCategory);
 
 // Label kategorisine göre mailleri getir
 router.get('/label-category/:category', isAuthenticated, getMailsByLabelCategory);
+
+// Yıldızlı mailleri getir
+router.get('/starred/list', isAuthenticated, getStarredMails);
 
 // Mail istatistikleri
 router.get('/stats/overview', isAuthenticated, getMailStats);
