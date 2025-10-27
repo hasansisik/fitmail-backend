@@ -287,9 +287,15 @@ const getMyProfile = async (req, res, next) => {
       });
     }
 
+    // Add picture property for consistency with login/register responses
+    const userWithPicture = {
+      ...user.toObject(),
+      picture: user.profile?.picture || "https://res.cloudinary.com/da2qwsrbv/image/upload/v1759932330/F_punfds.png"
+    };
+
     res.status(200).json({
       success: true,
-      user,
+      user: userWithPicture,
     });
   } catch (error) {
     next(error);
