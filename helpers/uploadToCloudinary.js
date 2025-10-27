@@ -6,9 +6,13 @@ const CLOUD_NAME = 'da2qwsrbv';
 const API_KEY = '712369776222516';
 const API_SECRET = '3uw0opJfkdYDp-XQsXclVIcbbKQ';
 
-function generateSignature(timestamp) {
-  const str = `timestamp=${timestamp}${API_SECRET}`;
-  return crypto.createHash('sha1').update(str).digest('hex');
+function generateSignature(params) {
+  const sortedParams = Object.keys(params)
+    .sort()
+    .map(key => `${key}=${params[key]}`)
+    .join('&');
+  const stringToSign = sortedParams + API_SECRET;
+  return crypto.createHash('sha1').update(stringToSign).digest('hex');
 }
 
 /**
@@ -21,13 +25,14 @@ function generateSignature(timestamp) {
 async function uploadFileToCloudinary(fileBuffer, filename, mimetype) {
   try {
     const timestamp = Math.round(new Date().getTime() / 1000);
-    const signature = generateSignature(timestamp);
-
-    // Dosya türüne göre upload endpoint'i belirle
+    
+    // Dosya türüne göre upload endpoint ve resource_type belirle
     let uploadEndpoint = 'image/upload';
+    let resourceType = 'image';
     
     if (mimetype.startsWith('image/')) {
       uploadEndpoint = 'image/upload';
+      resourceType = 'image';
     } else if (
       mimetype.includes('pdf') || 
       mimetype.includes('document') || 
@@ -39,10 +44,23 @@ async function uploadFileToCloudinary(fileBuffer, filename, mimetype) {
       mimetype.includes('rar')
     ) {
       uploadEndpoint = 'raw/upload';
+      resourceType = 'raw';
     } else {
       // Diğer dosyalar için raw upload kullan
       uploadEndpoint = 'raw/upload';
+      resourceType = 'raw';
     }
+
+    // İmza için parametreler
+    const params = {
+      timestamp: timestamp,
+      resource_type: resourceType,
+      use_filename: true,
+      unique_filename: true
+    };
+    
+    // İmza oluştur
+    const signature = generateSignature(params);
 
     // FormData oluştur
     const formData = new FormData();
@@ -50,6 +68,9 @@ async function uploadFileToCloudinary(fileBuffer, filename, mimetype) {
     formData.append('api_key', API_KEY);
     formData.append('timestamp', timestamp.toString());
     formData.append('signature', signature);
+    formData.append('resource_type', resourceType);
+    formData.append('use_filename', 'true');
+    formData.append('unique_filename', 'true');
 
     // Cloudinary'ye yükle
     const response = await axios.post(

@@ -88,6 +88,10 @@ const sendMail = async (req, res, next) => {
     };
 
     // Mail'i veritabanına kaydet
+    // messageId unique olmalı - rastgele bir ID oluştur
+    const uniqueMessageId = `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    mailData.messageId = uniqueMessageId;
+    
     const mail = new Mail(mailData);
     await mail.save();
     console.log("Mail saved to database with ID:", mail._id);
@@ -118,9 +122,11 @@ const sendMail = async (req, res, next) => {
     if (mailgunResult.success) {
       // Mail durumunu güncelle
       mail.status = 'sent';
-      mail.messageId = mailgunResult.messageId;
-      mail.mailgunId = mailgunResult.messageId;
-      mail.mailgunResponse = mailgunResult.response;
+      // Mailgun'dan gelen messageId'yi ekle (varsa)
+      if (mailgunResult.messageId) {
+        mail.mailgunId = mailgunResult.messageId;
+        mail.mailgunResponse = mailgunResult.response;
+      }
       await mail.save();
       console.log("Mail status updated to 'sent' for ID:", mail._id);
 
