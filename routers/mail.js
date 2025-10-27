@@ -2,6 +2,8 @@ const express = require('express');
 const multer = require('multer');
 const {
   sendMail,
+  saveDraft,
+  getDrafts,
   getInbox,
   getMailById,
   toggleReadStatus,
@@ -49,6 +51,12 @@ router.post('/webhook', upload.any(), handleMailgunWebhook);
 
 // Mail gönderme
 router.post('/send', isAuthenticated, upload.array('attachments', 5), sendMail);
+
+// Taslak kaydetme
+router.post('/save-draft', isAuthenticated, upload.array('attachments', 5), saveDraft);
+
+// Taslakları getir
+router.get('/drafts', isAuthenticated, getDrafts);
 
 // Gelen kutularını getir
 router.get('/inbox', isAuthenticated, getInbox);

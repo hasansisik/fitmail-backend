@@ -18,16 +18,161 @@ const fixGmailAttachmentUrl = (url) => {
   return url;
 };
 
+// Taslak kaydetme
+const saveDraft = async (req, res, next) => {
+  try {
+    const { to, subject, content, htmlContent, cc, bcc, labels, draftId } = req.body;
+    const userId = req.user.userId;
+    const files = req.files || [];
+
+    console.log("saveDraft request body:", req.body);
+    console.log("saveDraft files:", files);
+    console.log("saveDraft userId:", userId);
+    console.log("saveDraft draftId:", draftId);
+
+    // Kullanıcıyı bul
+    const user = await User.findById(userId);
+    if (!user) {
+      throw new CustomError.NotFoundError("Kullanıcı bulunamadı");
+    }
+
+    // Mail adresini kontrol et
+    if (!user.mailAddress) {
+      throw new CustomError.BadRequestError("Mail adresiniz tanımlanmamış");
+    }
+
+    // Parse JSON strings (eğer varsa)
+    const recipients = to ? (Array.isArray(to) ? to : JSON.parse(to)) : [];
+    const ccRecipients = cc ? (Array.isArray(cc) ? cc : JSON.parse(cc)) : [];
+    const bccRecipients = bcc ? (Array.isArray(bcc) ? bcc : JSON.parse(bcc)) : [];
+
+    // Prepare attachments
+    const attachmentNames = req.body.attachmentNames ? JSON.parse(req.body.attachmentNames) : [];
+    const attachmentTypes = req.body.attachmentTypes ? JSON.parse(req.body.attachmentTypes) : [];
+    const attachmentUrls = req.body.attachmentUrls ? JSON.parse(req.body.attachmentUrls) : [];
+
+    const attachments = files.map((file, index) => ({
+      filename: attachmentNames[index] || file.originalname,
+      data: file.buffer,
+      contentType: attachmentTypes[index] || file.mimetype,
+      size: file.size,
+      url: attachmentUrls[index] || null
+    }));
+
+    // Eğer draftId varsa, mevcut taslağı güncelle
+    if (draftId) {
+      const existingDraft = await Mail.findOne({ _id: draftId, user: userId, folder: 'drafts' });
+      
+      if (existingDraft) {
+        // Mevcut taslağı güncelle
+        if (recipients.length > 0) {
+          existingDraft.to = recipients.map(email => ({ email, name: email.split('@')[0] }));
+        }
+        if (ccRecipients.length > 0) {
+          existingDraft.cc = ccRecipients.map(email => ({ email, name: email.split('@')[0] }));
+        }
+        if (bccRecipients.length > 0) {
+          existingDraft.bcc = bccRecipients.map(email => ({ email, name: email.split('@')[0] }));
+        }
+        if (subject) existingDraft.subject = subject;
+        if (content) existingDraft.content = content;
+        if (htmlContent) existingDraft.htmlContent = htmlContent;
+        if (attachments.length > 0) existingDraft.attachments = attachments;
+        if (labels) existingDraft.labels = labels;
+
+        await existingDraft.save();
+        console.log("Draft updated:", existingDraft._id);
+
+        return res.status(StatusCodes.OK).json({
+          success: true,
+          message: "Taslak güncellendi",
+          draft: existingDraft
+        });
+      }
+    }
+
+    // Yeni taslak oluştur
+    const mailData = {
+      from: {
+        email: user.mailAddress,
+        name: `${user.name} ${user.surname}`
+      },
+      to: recipients.map(email => ({ email, name: email.split('@')[0] })),
+      cc: ccRecipients.map(email => ({ email, name: email.split('@')[0] })),
+      bcc: bccRecipients.map(email => ({ email, name: email.split('@')[0] })),
+      subject: subject || '(Konusuz)',
+      content: content || '',
+      htmlContent: htmlContent || content || '',
+      folder: 'drafts',
+      status: 'draft',
+      labels: labels || [],
+      attachments: attachments || [],
+      user: userId,
+      messageId: `draft-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+    };
+
+    const draft = new Mail(mailData);
+    await draft.save();
+    console.log("Draft saved:", draft._id);
+
+    // Kullanıcının mail listesine ekle
+    user.mails.push(draft._id);
+    await user.save();
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      message: "Taslak kaydedildi",
+      draft: draft
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Taslakları getir
+const getDrafts = async (req, res, next) => {
+  try {
+    const userId = req.user.userId;
+    const { page = 1, limit = 20 } = req.query;
+
+    const filter = { user: userId, folder: 'drafts' };
+    const skip = (page - 1) * limit;
+
+    const drafts = await Mail.find(filter)
+      .populate('user', 'name surname mailAddress')
+      .sort({ updatedAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    const total = await Mail.countDocuments(filter);
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      mails: drafts,
+      folder: 'drafts',
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(total / limit),
+        totalItems: total,
+        itemsPerPage: parseInt(limit)
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // Mail gönderme
 const sendMail = async (req, res, next) => {
   try {
-    const { to, subject, content, htmlContent, cc, bcc, labels } = req.body;
+    const { to, subject, content, htmlContent, cc, bcc, labels, draftId } = req.body;
     const userId = req.user.userId;
     const files = req.files || [];
 
     console.log("sendMail request body:", req.body);
     console.log("sendMail files:", files);
     console.log("sendMail userId:", userId);
+    console.log("sendMail draftId:", draftId);
 
     if (!to || !subject || !content) {
       throw new CustomError.BadRequestError("Alıcı, konu ve içerik gereklidir");
@@ -139,6 +284,17 @@ const sendMail = async (req, res, next) => {
       console.log("Final mail folder:", mail.folder);
       console.log("Final mail status:", mail.status);
 
+      // Eğer taslaktan gönderiyorsak, taslağı sil
+      if (draftId) {
+        try {
+          await Mail.findByIdAndDelete(draftId);
+          console.log("Draft deleted after sending:", draftId);
+        } catch (deleteError) {
+          console.error("Error deleting draft:", deleteError);
+          // Taslak silme hatası mail gönderme işlemini etkilemesin
+        }
+      }
+
       res.status(StatusCodes.OK).json({
         success: true,
         message: "Mail başarıyla gönderildi",
@@ -149,7 +305,8 @@ const sendMail = async (req, res, next) => {
           status: mail.status,
           folder: mail.folder,
           sentAt: mail.sentAt
-        }
+        },
+        deletedDraftId: draftId || null
       });
     } else {
       // Gönderim başarısız
@@ -1862,6 +2019,8 @@ const addReplyToMail = async (req, res, next) => {
 
 module.exports = {
   sendMail,
+  saveDraft,
+  getDrafts,
   getInbox,
   getMailById,
   toggleReadStatus,
@@ -1887,6 +2046,5 @@ module.exports = {
   handleMailgunWebhook,
   cleanupTrashMails,
   manualCleanupTrash,
-  fixGmailAttachmentUrls,
-  testWebhook
+  fixGmailAttachmentUrls
 };
