@@ -91,7 +91,16 @@ const saveDraft = async (req, res, next) => {
       }
     }
 
-    // Yeni taslak oluştur
+    // Yeni taslak oluştur - unique messageId oluştur
+    let draftMessageId = `draft-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+    // MessageId'nin unique olduğundan emin ol
+    let existingDraft = await Mail.findOne({ messageId: draftMessageId });
+    while (existingDraft) {
+      draftMessageId = `draft-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      existingDraft = await Mail.findOne({ messageId: draftMessageId });
+    }
+    
     const mailData = {
       from: {
         email: user.mailAddress,
@@ -108,7 +117,7 @@ const saveDraft = async (req, res, next) => {
       labels: labels || [],
       attachments: attachments || [],
       user: userId,
-      messageId: `draft-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+      messageId: draftMessageId
     };
 
     const draft = new Mail(mailData);
@@ -234,7 +243,15 @@ const sendMail = async (req, res, next) => {
 
     // Mail'i veritabanına kaydet
     // messageId unique olmalı - rastgele bir ID oluştur
-    const uniqueMessageId = `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    let uniqueMessageId = `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+    // MessageId'nin unique olduğundan emin ol
+    let existingMail = await Mail.findOne({ messageId: uniqueMessageId });
+    while (existingMail) {
+      uniqueMessageId = `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      existingMail = await Mail.findOne({ messageId: uniqueMessageId });
+    }
+    
     mailData.messageId = uniqueMessageId;
     
     const mail = new Mail(mailData);
@@ -279,6 +296,68 @@ const sendMail = async (req, res, next) => {
       user.mails.push(mail._id);
       await user.save();
       console.log("Mail added to user's mail list. User ID:", userId);
+
+      // Aynı domain içi mail kontrolü - alıcıların inbox'ına da kaydet
+      const domain = process.env.MAIL_DOMAIN || 'gozdedijital.xyz';
+      for (const recipient of recipients) {
+        if (recipient.endsWith(`@${domain}`)) {
+          console.log(`Internal mail detected for recipient: ${recipient}`);
+          
+          // Alıcı kullanıcıyı bul
+          const recipientUser = await User.findOne({ mailAddress: recipient });
+          if (recipientUser) {
+            console.log(`Found recipient user: ${recipientUser._id}`);
+            
+            // Alıcı için unique messageId oluştur
+            let inboxMessageId = `inbox-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+            
+            // MessageId'nin unique olduğundan emin ol
+            let existingInboxMail = await Mail.findOne({ messageId: inboxMessageId });
+            while (existingInboxMail) {
+              inboxMessageId = `inbox-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+              existingInboxMail = await Mail.findOne({ messageId: inboxMessageId });
+            }
+            
+            // Alıcı için inbox'a bir kopya oluştur
+            const inboxMailData = {
+              from: {
+                email: user.mailAddress,
+                name: `${user.name} ${user.surname}`
+              },
+              to: [{
+                email: recipient,
+                name: recipient.split('@')[0]
+              }],
+              cc: ccRecipients.map(email => ({ email, name: email.split('@')[0] })),
+              bcc: bccRecipients.map(email => ({ email, name: email.split('@')[0] })),
+              subject,
+              content,
+              htmlContent: htmlContent || content,
+              folder: 'inbox',
+              status: 'delivered',
+              isRead: false,
+              labels: labels || [],
+              attachments: attachments || [],
+              user: recipientUser._id,
+              messageId: inboxMessageId, // Unique messageId
+              inReplyTo: uniqueMessageId, // Orijinal mail'in messageId'si
+              receivedAt: new Date(),
+              mailgunId: mailgunResult.messageId
+            };
+            
+            const inboxMail = new Mail(inboxMailData);
+            await inboxMail.save();
+            console.log(`Inbox mail created for recipient ${recipient}: ${inboxMail._id}`);
+            
+            // Alıcının mail listesine ekle
+            recipientUser.mails.push(inboxMail._id);
+            await recipientUser.save();
+            console.log(`Mail added to recipient's inbox. Recipient ID: ${recipientUser._id}`);
+          } else {
+            console.log(`Recipient user not found for: ${recipient}`);
+          }
+        }
+      }
 
       console.log("Mail sent successfully:", mail._id);
       console.log("Final mail folder:", mail.folder);
@@ -1708,6 +1787,15 @@ const processWebhookData = async (webhookData, res) => {
     console.log('Auto-generated labels:', autoLabels);
     console.log('Auto-generated categories:', autoCategories);
 
+    // MessageId'nin unique olduğundan emin ol
+    let uniqueMessageId = messageId;
+    const existingMail = await Mail.findOne({ messageId: messageId });
+    if (existingMail) {
+      // Eğer aynı messageId varsa, yeni bir tane oluştur
+      uniqueMessageId = `${messageId}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      console.log(`Duplicate messageId detected, using new one: ${uniqueMessageId}`);
+    }
+
     // Mail objesi oluştur
     const mailData = {
       from: {
@@ -1727,7 +1815,7 @@ const processWebhookData = async (webhookData, res) => {
       status: 'delivered',
       isRead: false,
       receivedAt: new Date(timestamp * 1000), // Unix timestamp to Date
-      messageId: messageId,
+      messageId: uniqueMessageId,
       mailgunId: messageId,
       user: recipientUser._id,
       labels: autoLabels, // Otomatik etiketler
@@ -1978,7 +2066,14 @@ const addReplyToMail = async (req, res, next) => {
     const replySubject = originalMail.subject.startsWith('Re:') ? originalMail.subject : `Re: ${originalMail.subject}`;
     
     // Unique messageId oluştur - duplicate hatası olmaması için
-    const uniqueMessageId = `reply-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    let uniqueMessageId = `reply-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+    // MessageId'nin unique olduğundan emin ol
+    let existingReply = await Mail.findOne({ messageId: uniqueMessageId });
+    while (existingReply) {
+      uniqueMessageId = `reply-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      existingReply = await Mail.findOne({ messageId: uniqueMessageId });
+    }
     
     const replyMailData = {
       from: {
@@ -2036,6 +2131,88 @@ const addReplyToMail = async (req, res, next) => {
       user.mails.push(replyMail._id);
       await user.save();
       console.log("Reply mail added to user's mail list. User ID:", userId);
+
+      // Aynı domain içi cevap kontrolü - alıcının inbox'ına da kaydet
+      const domain = process.env.MAIL_DOMAIN || 'gozdedijital.xyz';
+      const recipientEmail = originalMail.from.email;
+      
+      if (recipientEmail.endsWith(`@${domain}`)) {
+        console.log(`Internal reply detected for recipient: ${recipientEmail}`);
+        
+        // Alıcı kullanıcıyı bul
+        const recipientUser = await User.findOne({ mailAddress: recipientEmail });
+        if (recipientUser) {
+          console.log(`Found recipient user for reply: ${recipientUser._id}`);
+          
+          // Alıcı için unique messageId oluştur
+          let inboxReplyMessageId = `inbox-reply-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+          
+          // MessageId'nin unique olduğundan emin ol
+          let existingInboxReply = await Mail.findOne({ messageId: inboxReplyMessageId });
+          while (existingInboxReply) {
+            inboxReplyMessageId = `inbox-reply-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+            existingInboxReply = await Mail.findOne({ messageId: inboxReplyMessageId });
+          }
+          
+          // Alıcı için inbox'a bir kopya oluştur
+          const inboxReplyData = {
+            from: {
+              email: user.mailAddress,
+              name: `${user.name} ${user.surname}`
+            },
+            to: [{
+              email: recipientEmail,
+              name: originalMail.from.name
+            }],
+            cc: originalMail.cc || [],
+            bcc: originalMail.bcc || [],
+            subject: replySubject,
+            content: content,
+            htmlContent: content.replace(/\n/g, '<br>'),
+            folder: 'inbox',
+            status: 'delivered',
+            isRead: false,
+            labels: originalMail.labels || [],
+            attachments: attachments || [],
+            user: recipientUser._id,
+            messageId: inboxReplyMessageId, // Unique messageId
+            inReplyTo: originalMail.messageId || originalMail._id.toString(),
+            references: originalMail.references ? [...originalMail.references, originalMail.messageId || originalMail._id.toString()] : [originalMail.messageId || originalMail._id.toString()],
+            receivedAt: new Date(),
+            mailgunId: mailgunResult.messageId
+          };
+          
+          const inboxReply = new Mail(inboxReplyData);
+          await inboxReply.save();
+          console.log(`Inbox reply created for recipient ${recipientEmail}: ${inboxReply._id}`);
+          
+          // Alıcının mail listesine ekle
+          recipientUser.mails.push(inboxReply._id);
+          await recipientUser.save();
+          console.log(`Reply added to recipient's inbox. Recipient ID: ${recipientUser._id}`);
+          
+          // Alıcının orijinal mailine de cevabı ekle
+          const recipientOriginalMail = await Mail.findOne({ 
+            user: recipientUser._id,
+            $or: [
+              { messageId: originalMail.messageId },
+              { _id: originalMail._id }
+            ]
+          });
+          
+          if (recipientOriginalMail) {
+            const recipientReplyData = {
+              sender: `${user.name} ${user.surname}`,
+              content: content,
+              isFromMe: false // Alıcı için bu cevap karşı taraftan geldi
+            };
+            await recipientOriginalMail.addReply(recipientReplyData);
+            console.log(`Reply added to recipient's original mail conversation`);
+          }
+        } else {
+          console.log(`Recipient user not found for reply: ${recipientEmail}`);
+        }
+      }
 
       res.status(StatusCodes.OK).json({
         success: true,
