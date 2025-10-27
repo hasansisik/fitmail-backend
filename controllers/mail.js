@@ -681,7 +681,7 @@ const setupMailAddress = async (req, res, next) => {
       message: "Mail adresi başarıyla ayarlandı ve Mailgun route oluşturuldu",
       mailAddress: email,
       route: routeResult.route,
-      webhookUrl: process.env.WEBHOOK_URL || 'https://mail-backend-mu.vercel.app/v1/mail/webhook'
+      webhookUrl: process.env.WEBHOOK_URL || 'http://localhost:5003/v1/mail/webhook'
     });
   } catch (error) {
     next(error);
