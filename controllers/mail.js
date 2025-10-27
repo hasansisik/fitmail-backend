@@ -1976,6 +1976,10 @@ const addReplyToMail = async (req, res, next) => {
 
     // Cevap için yeni bir mail objesi oluştur (gönderilen kutusuna düşmesi için)
     const replySubject = originalMail.subject.startsWith('Re:') ? originalMail.subject : `Re: ${originalMail.subject}`;
+    
+    // Unique messageId oluştur - duplicate hatası olmaması için
+    const uniqueMessageId = `reply-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
     const replyMailData = {
       from: {
         email: user.mailAddress,
@@ -1995,6 +1999,7 @@ const addReplyToMail = async (req, res, next) => {
       labels: originalMail.labels || [],
       attachments: attachments || [],
       user: userId,
+      messageId: uniqueMessageId, // Unique messageId ekle
       inReplyTo: originalMail.messageId || originalMail._id.toString(),
       references: originalMail.references ? [...originalMail.references, originalMail.messageId || originalMail._id.toString()] : [originalMail.messageId || originalMail._id.toString()]
     };
