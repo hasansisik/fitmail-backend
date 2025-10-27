@@ -174,7 +174,7 @@ const getDrafts = async (req, res, next) => {
 // Mail gönderme
 const sendMail = async (req, res, next) => {
   try {
-    const { to, subject, content, htmlContent, cc, bcc, labels, draftId } = req.body;
+    const { to, subject, content, htmlContent, cc, bcc, labels, draftId, scheduledSendAt } = req.body;
     const userId = req.user.userId;
     const files = req.files || [];
 
@@ -182,9 +182,23 @@ const sendMail = async (req, res, next) => {
     console.log("sendMail files:", files);
     console.log("sendMail userId:", userId);
     console.log("sendMail draftId:", draftId);
+    console.log("sendMail scheduledSendAt:", scheduledSendAt);
 
     if (!to || !subject || !content) {
       throw new CustomError.BadRequestError("Alıcı, konu ve içerik gereklidir");
+    }
+    
+    // Eğer planlı gönderim varsa, mail'i scheduled olarak kaydet
+    if (scheduledSendAt) {
+      const scheduledDate = new Date(scheduledSendAt);
+      const now = new Date();
+      
+      if (scheduledDate <= now) {
+        throw new CustomError.BadRequestError("Planlı gönderim tarihi gelecekte olmalıdır");
+      }
+      
+      // Planlı mail olarak kaydet
+      return await scheduleMailForLater(req, res, next);
     }
 
     // Kullanıcıyı bul
@@ -2007,6 +2021,292 @@ const fixGmailAttachmentUrls = async (req, res, next) => {
   }
 };
 
+// Planlı mail kaydetme
+const scheduleMailForLater = async (req, res, next) => {
+  try {
+    const { to, subject, content, htmlContent, cc, bcc, labels, draftId, scheduledSendAt } = req.body;
+    const userId = req.user.userId;
+    const files = req.files || [];
+
+    console.log("scheduleMailForLater request body:", req.body);
+
+    // Kullanıcıyı bul
+    const user = await User.findById(userId);
+    if (!user) {
+      throw new CustomError.NotFoundError("Kullanıcı bulunamadı");
+    }
+
+    if (!user.mailAddress) {
+      throw new CustomError.BadRequestError("Mail adresiniz tanımlanmamış");
+    }
+
+    // Parse JSON strings
+    const recipients = Array.isArray(to) ? to : JSON.parse(to);
+    const ccRecipients = cc ? (Array.isArray(cc) ? cc : JSON.parse(cc)) : [];
+    const bccRecipients = bcc ? (Array.isArray(bcc) ? bcc : JSON.parse(bcc)) : [];
+
+    // Prepare attachments
+    const attachmentNames = req.body.attachmentNames ? JSON.parse(req.body.attachmentNames) : [];
+    const attachmentTypes = req.body.attachmentTypes ? JSON.parse(req.body.attachmentTypes) : [];
+    const attachmentUrls = req.body.attachmentUrls ? JSON.parse(req.body.attachmentUrls) : [];
+
+    const attachments = files.map((file, index) => ({
+      filename: attachmentNames[index] || file.originalname,
+      data: file.buffer,
+      contentType: attachmentTypes[index] || file.mimetype,
+      size: file.size,
+      url: attachmentUrls[index] || null
+    }));
+
+    // Unique messageId oluştur
+    let uniqueMessageId = `scheduled-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    let existingMail = await Mail.findOne({ messageId: uniqueMessageId });
+    while (existingMail) {
+      uniqueMessageId = `scheduled-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      existingMail = await Mail.findOne({ messageId: uniqueMessageId });
+    }
+
+    // Mail objesi oluştur
+    const mailData = {
+      from: {
+        email: user.mailAddress,
+        name: `${user.name} ${user.surname}`
+      },
+      to: recipients.map(email => ({ email, name: email.split('@')[0] })),
+      cc: ccRecipients.map(email => ({ email, name: email.split('@')[0] })),
+      bcc: bccRecipients.map(email => ({ email, name: email.split('@')[0] })),
+      subject,
+      content,
+      htmlContent: htmlContent || content,
+      folder: 'scheduled',
+      status: 'scheduled',
+      labels: labels || [],
+      attachments: attachments || [],
+      user: userId,
+      messageId: uniqueMessageId,
+      scheduledSendAt: new Date(scheduledSendAt)
+    };
+
+    // Mail'i veritabanına kaydet
+    const mail = new Mail(mailData);
+    await mail.save();
+    console.log("Scheduled mail saved to database with ID:", mail._id);
+
+    // Kullanıcının mail listesine ekle
+    user.mails.push(mail._id);
+    await user.save();
+
+    // Eğer taslaktan planlıyorsak, taslağı sil
+    if (draftId) {
+      try {
+        await Mail.findByIdAndDelete(draftId);
+        console.log("Draft deleted after scheduling:", draftId);
+      } catch (deleteError) {
+        console.error("Error deleting draft:", deleteError);
+      }
+    }
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      message: `Mail ${new Date(scheduledSendAt).toLocaleString('tr-TR')} tarihinde gönderilmek üzere planlandı`,
+      mail: {
+        _id: mail._id,
+        subject: mail.subject,
+        to: mail.to,
+        status: mail.status,
+        folder: mail.folder,
+        scheduledSendAt: mail.scheduledSendAt
+      },
+      deletedDraftId: draftId || null
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Planlı mailleri getir
+const getScheduledMails = async (req, res, next) => {
+  try {
+    const userId = req.user.userId;
+    const { page = 1, limit = 20 } = req.query;
+
+    const filter = { user: userId, folder: 'scheduled', status: 'scheduled' };
+    const skip = (page - 1) * limit;
+
+    const mails = await Mail.find(filter)
+      .populate('user', 'name surname mailAddress')
+      .sort({ scheduledSendAt: 1 }) // En yakın tarihli önce
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    const total = await Mail.countDocuments(filter);
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      mails: mails,
+      folder: 'scheduled',
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(total / limit),
+        totalItems: total,
+        itemsPerPage: parseInt(limit)
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Planlı mail'i iptal et
+const cancelScheduledMail = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.userId;
+
+    const mail = await Mail.findOne({ _id: id, user: userId, status: 'scheduled' });
+    if (!mail) {
+      throw new CustomError.NotFoundError("Planlı mail bulunamadı");
+    }
+
+    // Mail'i taslak olarak değiştir
+    mail.status = 'draft';
+    mail.folder = 'drafts';
+    mail.scheduledSendAt = undefined;
+    await mail.save();
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      message: "Planlı gönderim iptal edildi ve mail taslak olarak kaydedildi",
+      mail: mail
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Planlı mailleri kontrol et ve gönder (cron job için)
+const processScheduledMails = async () => {
+  try {
+    const now = new Date();
+    console.log(`[${now.toISOString()}] Checking for scheduled mails to send...`);
+
+    // Gönderilmesi gereken planlı mailleri bul
+    const scheduledMails = await Mail.find({
+      status: 'scheduled',
+      folder: 'scheduled',
+      scheduledSendAt: { $lte: now }
+    }).populate('user', 'name surname mailAddress');
+
+    console.log(`Found ${scheduledMails.length} scheduled mails to send`);
+
+    for (const mail of scheduledMails) {
+      try {
+        console.log(`Processing scheduled mail: ${mail._id}`);
+
+        // Kullanıcı bilgilerini kontrol et
+        if (!mail.user || !mail.user.mailAddress) {
+          console.error(`User not found or no mail address for mail: ${mail._id}`);
+          mail.status = 'failed';
+          await mail.save();
+          continue;
+        }
+
+        // Mailgun ile gönder
+        const mailgunData = {
+          from: `${mail.from.name} <${mail.from.email}>`,
+          to: mail.to.map(r => r.email).join(', '),
+          subject: mail.subject,
+          text: mail.content,
+          html: mail.htmlContent || mail.content,
+          attachments: mail.attachments || []
+        };
+
+        if (mail.cc && mail.cc.length > 0) {
+          mailgunData.cc = mail.cc.map(r => r.email).join(', ');
+        }
+        if (mail.bcc && mail.bcc.length > 0) {
+          mailgunData.bcc = mail.bcc.map(r => r.email).join(', ');
+        }
+
+        console.log("Sending scheduled mail via Mailgun:", mail._id);
+        const mailgunResult = await mailgunService.sendMail(mailgunData);
+
+        if (mailgunResult.success) {
+          // Mail durumunu güncelle
+          mail.status = 'sent';
+          mail.folder = 'sent';
+          mail.sentAt = new Date();
+          if (mailgunResult.messageId) {
+            mail.mailgunId = mailgunResult.messageId;
+            mail.mailgunResponse = mailgunResult.response;
+          }
+          await mail.save();
+          console.log(`Scheduled mail sent successfully: ${mail._id}`);
+
+          // Aynı domain içi mail kontrolü
+          const domain = process.env.MAIL_DOMAIN || 'gozdedijital.xyz';
+          for (const recipient of mail.to) {
+            if (recipient.email.endsWith(`@${domain}`)) {
+              console.log(`Internal scheduled mail detected for recipient: ${recipient.email}`);
+              
+              const recipientUser = await User.findOne({ mailAddress: recipient.email });
+              if (recipientUser) {
+                let inboxMessageId = `inbox-scheduled-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                let existingInboxMail = await Mail.findOne({ messageId: inboxMessageId });
+                while (existingInboxMail) {
+                  inboxMessageId = `inbox-scheduled-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                  existingInboxMail = await Mail.findOne({ messageId: inboxMessageId });
+                }
+                
+                const inboxMailData = {
+                  from: mail.from,
+                  to: [{ email: recipient.email, name: recipient.name }],
+                  cc: mail.cc,
+                  bcc: mail.bcc,
+                  subject: mail.subject,
+                  content: mail.content,
+                  htmlContent: mail.htmlContent,
+                  folder: 'inbox',
+                  status: 'delivered',
+                  isRead: false,
+                  labels: mail.labels,
+                  attachments: mail.attachments,
+                  user: recipientUser._id,
+                  messageId: inboxMessageId,
+                  inReplyTo: mail.messageId,
+                  receivedAt: new Date(),
+                  mailgunId: mailgunResult.messageId
+                };
+                
+                const inboxMail = new Mail(inboxMailData);
+                await inboxMail.save();
+                recipientUser.mails.push(inboxMail._id);
+                await recipientUser.save();
+                console.log(`Inbox mail created for scheduled mail recipient ${recipient.email}`);
+              }
+            }
+          }
+        } else {
+          // Gönderim başarısız
+          mail.status = 'failed';
+          await mail.save();
+          console.error(`Failed to send scheduled mail ${mail._id}:`, mailgunResult.error);
+        }
+      } catch (mailError) {
+        console.error(`Error processing scheduled mail ${mail._id}:`, mailError);
+        mail.status = 'failed';
+        await mail.save();
+      }
+    }
+
+    console.log(`Scheduled mail processing complete. Processed ${scheduledMails.length} mails.`);
+    return scheduledMails.length;
+  } catch (error) {
+    console.error('Error in processScheduledMails:', error);
+    return 0;
+  }
+};
+
 // Add Reply to Mail
 const addReplyToMail = async (req, res, next) => {
   try {
@@ -2282,5 +2582,9 @@ module.exports = {
   handleMailgunWebhook,
   cleanupTrashMails,
   manualCleanupTrash,
-  fixGmailAttachmentUrls
+  fixGmailAttachmentUrls,
+  scheduleMailForLater,
+  getScheduledMails,
+  cancelScheduledMail,
+  processScheduledMails
 };

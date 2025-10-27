@@ -135,6 +135,18 @@ app.use(erorHandlerMiddleware);
 
 const port = process.env.PORT || 5003
 
+// Planlı mailleri kontrol etmek için cron job
+const { processScheduledMails } = require('./controllers/mail');
+
+// Her dakika planlı mailleri kontrol et
+setInterval(async () => {
+  try {
+    await processScheduledMails();
+  } catch (error) {
+    console.error('Error in scheduled mail processing:', error);
+  }
+}, 60000); // 60 saniye = 1 dakika
+
 const start = async () => {
     try {
         await connectDB(process.env.MONGO_URL)

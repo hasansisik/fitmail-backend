@@ -33,14 +33,14 @@ const MailSchema = new mongoose.Schema({
   // Mail durumu
   status: {
     type: String,
-    enum: ['draft', 'sent', 'delivered', 'failed', 'bounced'],
+    enum: ['draft', 'sent', 'delivered', 'failed', 'bounced', 'scheduled'],
     default: 'draft'
   },
   
   // Klasör bilgisi
   folder: {
     type: String,
-    enum: ['inbox', 'sent', 'drafts', 'spam', 'trash', 'archive'],
+    enum: ['inbox', 'sent', 'drafts', 'spam', 'trash', 'archive', 'scheduled'],
     default: 'inbox'
   },
   
@@ -81,6 +81,7 @@ const MailSchema = new mongoose.Schema({
   readAt: { type: Date },
   snoozeUntil: { type: Date },
   deletedAt: { type: Date }, // Çöp kutusuna atılma tarihi
+  scheduledSendAt: { type: Date }, // Planlı gönderim tarihi
   
   // Kullanıcı referansı
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },

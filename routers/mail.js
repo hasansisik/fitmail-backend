@@ -30,7 +30,10 @@ const {
   handleMailgunWebhook,
   cleanupTrashMails,
   manualCleanupTrash,
-  fixGmailAttachmentUrls
+  fixGmailAttachmentUrls,
+  scheduleMailForLater,
+  getScheduledMails,
+  cancelScheduledMail
 } = require('../controllers/mail');
 const { isAuthenticated } = require('../middleware/authMiddleware');
 
@@ -136,5 +139,10 @@ router.post('/cleanup-trash', isAuthenticated, manualCleanupTrash);
 
 // Gmail attachment URL'lerini düzelt
 router.post('/fix-gmail-urls', isAuthenticated, fixGmailAttachmentUrls);
+
+// Planlı mail endpoint'leri
+router.post('/schedule', isAuthenticated, upload.array('attachments', 5), scheduleMailForLater);
+router.get('/scheduled/list', isAuthenticated, getScheduledMails);
+router.post('/:id/cancel-schedule', isAuthenticated, cancelScheduledMail);
 
 module.exports = router;
