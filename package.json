@@ -33,7 +33,9 @@
     "node-schedule": "^2.1.1",
     "nodemailer": "^6.9.8",
     "nodemon": "^3.0.2",
+    "qrcode": "^1.5.4",
     "socket.io": "^4.8.1",
+    "speakeasy": "^2.0.0",
     "uuid": "^9.0.1",
     "validator": "^13.11.0"
   }

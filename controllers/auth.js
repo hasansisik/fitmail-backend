@@ -6,6 +6,8 @@ const { sendResetPasswordEmail, sendVerificationEmail } = require("../helpers");
 const { generateToken } = require("../services/token.service");
 const mailgunService = require("../services/mailgun.service");
 const bcrypt = require("bcrypt");
+const speakeasy = require("speakeasy");
+const qrcode = require("qrcode");
 
 //Register
 const register = async (req, res, next) => {
@@ -133,19 +135,19 @@ const register = async (req, res, next) => {
 
     const accessToken = await generateToken(
       { userId: user._id, role: user.role },
-      "7d",
+      "365d",
       process.env.ACCESS_TOKEN_SECRET
     );
     const refreshToken = await generateToken(
       { userId: user._id, role: user.role },
-      "7d",
+      "365d",
       process.env.REFRESH_TOKEN_SECRET
     );
 
     res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
       path: "/v1/auth/refreshtoken",
-      maxAge: 7 * 24 * 60 * 60 * 1000, //7 days
+      maxAge: 365 * 24 * 60 * 60 * 1000, //365 days (1 year)
     });
 
     res.json({
@@ -206,21 +208,35 @@ const login = async (req, res, next) => {
       throw new CustomError.UnauthenticatedError("Hesabınız pasif durumda. Lütfen yönetici ile iletişime geçin.");
     }
 
+    // Check if 2FA is enabled
+    if (user.twoFactorEnabled) {
+      // Return a special response indicating 2FA is required
+      return res.status(StatusCodes.OK).json({
+        requires2FA: true,
+        tempToken: await generateToken(
+          { userId: user._id, role: user.role, temp: true },
+          "10m", // 10 minutes temporary token
+          process.env.ACCESS_TOKEN_SECRET
+        ),
+        message: "2FA kodu gerekli"
+      });
+    }
+
     const accessToken = await generateToken(
       { userId: user._id, role: user.role },
-      "7d",
+      "365d",
       process.env.ACCESS_TOKEN_SECRET
     );
     const refreshToken = await generateToken(
       { userId: user._id, role: user.role },
-      "7d",
+      "365d",
       process.env.REFRESH_TOKEN_SECRET
     );
 
     res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
       path: "/v1/auth/refreshtoken",
-      maxAge: 7 * 24 * 60 * 60 * 1000, //7 days
+      maxAge: 365 * 24 * 60 * 60 * 1000, //365 days (1 year)
     });
 
     const token = new Token({
@@ -1102,19 +1118,19 @@ const googleAuth = async (req, res, next) => {
     // Generate tokens
     const accessToken = await generateToken(
       { userId: user._id, role: user.role },
-      "7d",
+      "365d",
       process.env.ACCESS_TOKEN_SECRET
     );
     const refreshToken = await generateToken(
       { userId: user._id, role: user.role },
-      "7d",
+      "365d",
       process.env.REFRESH_TOKEN_SECRET
     );
 
     res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
       path: "/v1/auth/refreshtoken",
-      maxAge: 7 * 24 * 60 * 60 * 1000, //7 days
+      maxAge: 365 * 24 * 60 * 60 * 1000, //365 days (1 year)
     });
 
     const token = new Token({
@@ -1179,19 +1195,19 @@ const googleLogin = async (req, res, next) => {
     // Generate tokens
     const accessToken = await generateToken(
       { userId: user._id, role: user.role },
-      "7d",
+      "365d",
       process.env.ACCESS_TOKEN_SECRET
     );
     const refreshToken = await generateToken(
       { userId: user._id, role: user.role },
-      "7d",
+      "365d",
       process.env.REFRESH_TOKEN_SECRET
     );
 
     res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
       path: "/v1/auth/refreshtoken",
-      maxAge: 7 * 24 * 60 * 60 * 1000, //7 days
+      maxAge: 365 * 24 * 60 * 60 * 1000, //365 days (1 year)
     });
 
     const token = new Token({
@@ -1298,19 +1314,19 @@ const googleRegister = async (req, res, next) => {
 
     const accessToken = await generateToken(
       { userId: user._id, role: user.role },
-      "7d",
+      "365d",
       process.env.ACCESS_TOKEN_SECRET
     );
     const refreshToken = await generateToken(
       { userId: user._id, role: user.role },
-      "7d",
+      "365d",
       process.env.REFRESH_TOKEN_SECRET
     );
 
     res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
       path: "/v1/auth/refreshtoken",
-      maxAge: 7 * 24 * 60 * 60 * 1000, //7 days
+      maxAge: 365 * 24 * 60 * 60 * 1000, //365 days (1 year)
     });
 
     res.json({
@@ -1538,6 +1554,247 @@ const checkPremiumCode = async (req, res, next) => {
   }
 };
 
+//Enable 2FA
+const enable2FA = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user.userId).select('+twoFactorSecret');
+
+    if (!user) {
+      throw new CustomError.NotFoundError("Kullanıcı bulunamadı");
+    }
+
+    if (user.twoFactorEnabled) {
+      throw new CustomError.BadRequestError("2FA zaten aktif");
+    }
+
+    // Generate secret
+    const secret = speakeasy.generateSecret({
+      name: `Fitmail (${user.email})`,
+      length: 32
+    });
+
+    // Generate QR code
+    const qrCodeUrl = await qrcode.toDataURL(secret.otpauth_url);
+
+    // Save secret temporarily (will be confirmed after verification)
+    user.twoFactorSecret = secret.base32;
+    await user.save();
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      secret: secret.base32,
+      qrCode: qrCodeUrl,
+      message: "2FA kurulumu için QR kodu oluşturuldu. Lütfen doğrulama kodunu girin."
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+//Verify and Enable 2FA
+const verify2FA = async (req, res, next) => {
+  try {
+    const { token } = req.body;
+
+    if (!token) {
+      throw new CustomError.BadRequestError("Doğrulama kodu gereklidir");
+    }
+
+    const user = await User.findById(req.user.userId).select('+twoFactorSecret');
+
+    if (!user) {
+      throw new CustomError.NotFoundError("Kullanıcı bulunamadı");
+    }
+
+    if (!user.twoFactorSecret) {
+      throw new CustomError.BadRequestError("2FA kurulumu başlatılmamış");
+    }
+
+    // Verify token
+    const verified = speakeasy.totp.verify({
+      secret: user.twoFactorSecret,
+      encoding: 'base32',
+      token: token,
+      window: 2
+    });
+
+    if (!verified) {
+      throw new CustomError.BadRequestError("Geçersiz doğrulama kodu");
+    }
+
+    // Enable 2FA
+    user.twoFactorEnabled = true;
+    await user.save();
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      message: "2FA başarıyla aktifleştirildi"
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+//Disable 2FA
+const disable2FA = async (req, res, next) => {
+  try {
+    const { password } = req.body;
+
+    if (!password) {
+      throw new CustomError.BadRequestError("Şifre gereklidir");
+    }
+
+    const user = await User.findById(req.user.userId)
+      .populate({
+        path: "auth",
+        select: "+password",
+      })
+      .select('+twoFactorSecret');
+
+    if (!user) {
+      throw new CustomError.NotFoundError("Kullanıcı bulunamadı");
+    }
+
+    if (!user.twoFactorEnabled) {
+      throw new CustomError.BadRequestError("2FA zaten pasif");
+    }
+
+    // Verify password
+    const isPasswordCorrect = await bcrypt.compare(password, user.auth.password);
+
+    if (!isPasswordCorrect) {
+      throw new CustomError.UnauthenticatedError("Yanlış şifre");
+    }
+
+    // Disable 2FA
+    user.twoFactorEnabled = false;
+    user.twoFactorSecret = undefined;
+    await user.save();
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      message: "2FA başarıyla devre dışı bırakıldı"
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+//Verify 2FA Login
+const verify2FALogin = async (req, res, next) => {
+  try {
+    const { tempToken, token } = req.body;
+
+    if (!tempToken || !token) {
+      throw new CustomError.BadRequestError("Token ve doğrulama kodu gereklidir");
+    }
+
+    // Verify temp token
+    const jwt = require("jsonwebtoken");
+    let decoded;
+    try {
+      decoded = jwt.verify(tempToken, process.env.ACCESS_TOKEN_SECRET);
+    } catch (error) {
+      throw new CustomError.UnauthenticatedError("Geçersiz veya süresi dolmuş token");
+    }
+
+    if (!decoded.temp) {
+      throw new CustomError.UnauthenticatedError("Geçersiz token");
+    }
+
+    const user = await User.findById(decoded.userId)
+      .populate("profile")
+      .select('+twoFactorSecret');
+
+    if (!user) {
+      throw new CustomError.NotFoundError("Kullanıcı bulunamadı");
+    }
+
+    if (!user.twoFactorEnabled || !user.twoFactorSecret) {
+      throw new CustomError.BadRequestError("2FA aktif değil");
+    }
+
+    // Verify 2FA token
+    const verified = speakeasy.totp.verify({
+      secret: user.twoFactorSecret,
+      encoding: 'base32',
+      token: token,
+      window: 2
+    });
+
+    if (!verified) {
+      throw new CustomError.BadRequestError("Geçersiz doğrulama kodu");
+    }
+
+    // Generate real tokens
+    const accessToken = await generateToken(
+      { userId: user._id, role: user.role },
+      "365d",
+      process.env.ACCESS_TOKEN_SECRET
+    );
+    const refreshToken = await generateToken(
+      { userId: user._id, role: user.role },
+      "365d",
+      process.env.REFRESH_TOKEN_SECRET
+    );
+
+    res.cookie("refreshToken", refreshToken, {
+      httpOnly: true,
+      path: "/v1/auth/refreshtoken",
+      maxAge: 365 * 24 * 60 * 60 * 1000, //365 days (1 year)
+    });
+
+    const tokenDoc = new Token({
+      refreshToken,
+      accessToken,
+      ip: req.ip,
+      userAgent: req.headers["user-agent"],
+      user: user._id,
+    });
+
+    await tokenDoc.save();
+
+    res.json({
+      message: "2FA doğrulaması başarılı.",
+      user: {
+        _id: user._id,
+        name: user.name,
+        surname: user.surname,
+        email: user.email,
+        picture: user.profile?.picture || "https://res.cloudinary.com/da2qwsrbv/image/upload/v1759932330/F_punfds.png",
+        status: user.status,
+        courseTrial: user.courseTrial,
+        theme: user.theme,
+        mailAddress: user.mailAddress,
+        birthDate: user.birthDate,
+        gender: user.gender,
+        twoFactorEnabled: user.twoFactorEnabled,
+        token: accessToken,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+//Get 2FA Status
+const get2FAStatus = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user.userId);
+
+    if (!user) {
+      throw new CustomError.NotFoundError("Kullanıcı bulunamadı");
+    }
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      twoFactorEnabled: user.twoFactorEnabled || false
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   register,
   googleRegister,
@@ -1562,4 +1819,9 @@ module.exports = {
   updateUserStatus,
   checkEmailAvailability,
   checkPremiumCode,
+  enable2FA,
+  verify2FA,
+  disable2FA,
+  verify2FALogin,
+  get2FAStatus,
 };

@@ -1,5 +1,5 @@
 const express = require('express');
-const {register,googleRegister,googleAuth,login,googleLogin,getMyProfile,getAllUsers,logout,verifyRecoveryEmail,forgotPassword,resetPassword,verifyEmail,againEmail,editProfile,verifyPassword,changePassword,updateSettings,deleteAccount,deleteUser,updateUserRole,updateUserStatus,checkEmailAvailability,checkPremiumCode} = require('../controllers/auth');
+const {register,googleRegister,googleAuth,login,googleLogin,getMyProfile,getAllUsers,logout,verifyRecoveryEmail,forgotPassword,resetPassword,verifyEmail,againEmail,editProfile,verifyPassword,changePassword,updateSettings,deleteAccount,deleteUser,updateUserRole,updateUserStatus,checkEmailAvailability,checkPremiumCode,enable2FA,verify2FA,disable2FA,verify2FALogin,get2FAStatus} = require('../controllers/auth');
 const {isAuthenticated, isAdmin} = require('../middleware/authMiddleware');
 
 const router = express.Router();
@@ -23,6 +23,13 @@ router.post('/verify-password',isAuthenticated, verifyPassword);
 router.post('/change-password',isAuthenticated, changePassword);
 router.post('/update-settings',isAuthenticated, updateSettings);
 router.delete('/delete-account',isAuthenticated, deleteAccount);
+
+// 2FA routes
+router.post('/2fa/enable', isAuthenticated, enable2FA);
+router.post('/2fa/verify', isAuthenticated, verify2FA);
+router.post('/2fa/disable', isAuthenticated, disable2FA);
+router.post('/2fa/verify-login', verify2FALogin);
+router.get('/2fa/status', isAuthenticated, get2FAStatus);
 
 // Admin only routes
 router.get('/users', isAuthenticated, isAdmin, getAllUsers);

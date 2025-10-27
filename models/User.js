@@ -100,6 +100,8 @@ const UserSchema = new mongoose.Schema(
     },
     role: { type: String, enum: ["admin", "user"], default: "user" },
     isVerified: { type: Boolean, default: false },
+    twoFactorEnabled: { type: Boolean, default: false },
+    twoFactorSecret: { type: String, select: false },
     address: { type: mongoose.Schema.Types.ObjectId, ref: 'Address' },
     auth: { type: mongoose.Schema.Types.ObjectId, ref: 'Auth' }, 
     profile: { type: mongoose.Schema.Types.ObjectId, ref: 'Profile' },
