@@ -1865,6 +1865,84 @@ const get2FAStatus = async (req, res, next) => {
   }
 };
 
+// Switch Active Account (without re-login, if a previous session exists on this device)
+const switchActive = async (req, res, next) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(StatusCodes.BAD_REQUEST).json({ message: 'E-posta gereklidir' });
+    }
+
+    // Find target user
+    const user = await User.findOne({ email }).populate('profile');
+    if (!user) {
+      return res.status(StatusCodes.NOT_FOUND).json({ message: 'Kullanıcı bulunamadı' });
+    }
+
+    // Check if there is an existing token/session for this user from this device
+    const existingToken = await Token.findOne({ 
+      user: user._id,
+      userAgent: req.headers['user-agent']
+    });
+
+    if (!existingToken) {
+      return res.status(StatusCodes.CONFLICT).json({ message: 'Bu hesap için mevcut oturum bulunamadı. Lütfen bir kez giriş yapın.' });
+    }
+
+    // Generate fresh tokens and set cookies as active
+    const accessToken = await generateToken(
+      { userId: user._id, role: user.role },
+      '365d',
+      process.env.ACCESS_TOKEN_SECRET
+    );
+    const refreshToken = await generateToken(
+      { userId: user._id, role: user.role },
+      '365d',
+      process.env.REFRESH_TOKEN_SECRET
+    );
+
+    const cookieDomain = process.env.COOKIE_DOMAIN || '.gozdedijital.xyz';
+    res.cookie('accessToken', accessToken, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'None',
+      domain: cookieDomain,
+      path: '/',
+      maxAge: 365 * 24 * 60 * 60 * 1000,
+    });
+    res.cookie('refreshToken', refreshToken, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'None',
+      domain: cookieDomain,
+      path: '/',
+      maxAge: 365 * 24 * 60 * 60 * 1000,
+    });
+
+    // Persist server-side token record
+    existingToken.accessToken = accessToken;
+    existingToken.refreshToken = refreshToken;
+    existingToken.ip = req.ip;
+    await existingToken.save();
+
+    return res.status(StatusCodes.OK).json({
+      success: true,
+      user: {
+        _id: user._id,
+        name: user.name,
+        surname: user.surname,
+        email: user.email,
+        picture: user.profile?.picture || getLogoByGender(user.gender),
+        status: user.status,
+        courseTrial: user.courseTrial,
+        theme: user.theme,
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   register,
   googleRegister,
@@ -1872,6 +1950,7 @@ module.exports = {
   login,
   googleLogin,
   logout,
+  switchActive,
   verifyRecoveryEmail,
   forgotPassword,
   resetPassword,
