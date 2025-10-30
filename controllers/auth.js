@@ -431,23 +431,10 @@ const verifyRecoveryEmail = async (req, res) => {
 
   // If recovery email hint is provided, verify it
   if (recoveryEmailHint) {
-    const recoveryEmail = user.recoveryEmail.toLowerCase();
-    const hint = recoveryEmailHint.toLowerCase().trim();
-    
-    // Check if hint matches the start of recovery email or domain
-    const emailParts = recoveryEmail.split('@');
-    const localPart = emailParts[0];
-    const domain = emailParts[1];
-    
-    // User must provide at least first 3 characters of email or full domain
-    const isValid = 
-      localPart.startsWith(hint) || 
-      domain === hint || 
-      domain.startsWith(hint) ||
-      recoveryEmail.includes(hint);
-    
-    if (!isValid) {
-      throw new CustomError.BadRequestError("Kurtarıcı e-posta adresi doğrulanamadı.");
+    const recoveryEmail = user.recoveryEmail.toLowerCase().trim();
+    const input = recoveryEmailHint.toLowerCase().trim();
+    if (recoveryEmail !== input) {
+      throw new CustomError.BadRequestError("Kurtarıcı e-posta adresi doğrulanamadı. Lütfen kurtarıcı e-posta adresinizi tam ve doğru girin.");
     }
   }
 
