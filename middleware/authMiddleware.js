@@ -2,15 +2,20 @@ const createHttpError = require("http-errors");
 const jwt = require("jsonwebtoken");
 
 const isAuthenticated = async function (req, res, next) {
-  if (!req.headers["authorization"]) {
+  // Prefer HttpOnly cookie first, then Authorization header as fallback
+  const cookieToken = req.cookies && req.cookies.accessToken;
+  const headerAuth = req.headers["authorization"];
+  const headerToken = headerAuth ? headerAuth.split(" ")[1] : null;
+  const token = cookieToken || headerToken;
+
+  if (!token) {
     return res.status(401).json({
       success: false,
       message: "Oturum süreniz dolmuş. Lütfen tekrar giriş yapın.",
       requiresLogout: true
     });
   }
-  const bearerToken = req.headers["authorization"];
-  const token = bearerToken.split(" ")[1];
+
   jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, payload) => {
     if (err) {
       return res.status(401).json({

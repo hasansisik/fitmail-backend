@@ -155,9 +155,21 @@ const register = async (req, res, next) => {
       process.env.REFRESH_TOKEN_SECRET
     );
 
+    const cookieDomain = process.env.COOKIE_DOMAIN || '.gozdedijital.xyz';
+    res.cookie("accessToken", accessToken, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'None',
+      domain: cookieDomain,
+      path: '/',
+      maxAge: 365 * 24 * 60 * 60 * 1000,
+    });
     res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
-      path: "/v1/auth/refreshtoken",
+      secure: true,
+      sameSite: 'None',
+      domain: cookieDomain,
+      path: '/',
       maxAge: 365 * 24 * 60 * 60 * 1000, //365 days (1 year)
     });
 
@@ -244,9 +256,21 @@ const login = async (req, res, next) => {
       process.env.REFRESH_TOKEN_SECRET
     );
 
+    const cookieDomain = process.env.COOKIE_DOMAIN || '.gozdedijital.xyz';
+    res.cookie("accessToken", accessToken, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'None',
+      domain: cookieDomain,
+      path: '/',
+      maxAge: 365 * 24 * 60 * 60 * 1000,
+    });
     res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
-      path: "/v1/auth/refreshtoken",
+      secure: true,
+      sameSite: 'None',
+      domain: cookieDomain,
+      path: '/',
       maxAge: 365 * 24 * 60 * 60 * 1000, //365 days (1 year)
     });
 
@@ -409,7 +433,9 @@ const logout = async (req, res, next) => {
   try {
     await Token.findOneAndDelete({ user: req.user.userId });
 
-    res.clearCookie("refreshtoken", { path: "/v1/auth/refreshtoken" });
+    const cookieDomain = process.env.COOKIE_DOMAIN || '.gozdedijital.xyz';
+    res.clearCookie("accessToken", { domain: cookieDomain, path: '/', secure: true, sameSite: 'None', httpOnly: true });
+    res.clearCookie("refreshToken", { domain: cookieDomain, path: '/', secure: true, sameSite: 'None', httpOnly: true });
 
     res.json({
       message: "logged out !",
@@ -1123,9 +1149,21 @@ const googleAuth = async (req, res, next) => {
       process.env.REFRESH_TOKEN_SECRET
     );
 
+    const cookieDomain = process.env.COOKIE_DOMAIN || '.gozdedijital.xyz';
+    res.cookie("accessToken", accessToken, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'None',
+      domain: cookieDomain,
+      path: '/',
+      maxAge: 365 * 24 * 60 * 60 * 1000,
+    });
     res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
-      path: "/v1/auth/refreshtoken",
+      secure: true,
+      sameSite: 'None',
+      domain: cookieDomain,
+      path: '/',
       maxAge: 365 * 24 * 60 * 60 * 1000, //365 days (1 year)
     });
 
@@ -1200,9 +1238,21 @@ const googleLogin = async (req, res, next) => {
       process.env.REFRESH_TOKEN_SECRET
     );
 
+    const cookieDomain = process.env.COOKIE_DOMAIN || '.gozdedijital.xyz';
+    res.cookie("accessToken", accessToken, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'None',
+      domain: cookieDomain,
+      path: '/',
+      maxAge: 365 * 24 * 60 * 60 * 1000,
+    });
     res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
-      path: "/v1/auth/refreshtoken",
+      secure: true,
+      sameSite: 'None',
+      domain: cookieDomain,
+      path: '/',
       maxAge: 365 * 24 * 60 * 60 * 1000, //365 days (1 year)
     });
 
@@ -1319,9 +1369,21 @@ const googleRegister = async (req, res, next) => {
       process.env.REFRESH_TOKEN_SECRET
     );
 
+    const cookieDomain = process.env.COOKIE_DOMAIN || '.gozdedijital.xyz';
+    res.cookie("accessToken", accessToken, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'None',
+      domain: cookieDomain,
+      path: '/',
+      maxAge: 365 * 24 * 60 * 60 * 1000,
+    });
     res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
-      path: "/v1/auth/refreshtoken",
+      secure: true,
+      sameSite: 'None',
+      domain: cookieDomain,
+      path: '/',
       maxAge: 365 * 24 * 60 * 60 * 1000, //365 days (1 year)
     });
 
@@ -1734,9 +1796,21 @@ const verify2FALogin = async (req, res, next) => {
       process.env.REFRESH_TOKEN_SECRET
     );
 
+    const cookieDomain = process.env.COOKIE_DOMAIN || '.gozdedijital.xyz';
+    res.cookie("accessToken", accessToken, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'None',
+      domain: cookieDomain,
+      path: '/',
+      maxAge: 365 * 24 * 60 * 60 * 1000,
+    });
     res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
-      path: "/v1/auth/refreshtoken",
+      secure: true,
+      sameSite: 'None',
+      domain: cookieDomain,
+      path: '/',
       maxAge: 365 * 24 * 60 * 60 * 1000, //365 days (1 year)
     });
 
