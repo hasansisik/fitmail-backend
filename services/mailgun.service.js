@@ -147,7 +147,7 @@ class MailgunService {
         };
       }
 
-      const { from, to, subject, text, html, attachments = [] } = mailData;
+      const { from, to, subject, text, html, attachments = [], inReplyTo, references } = mailData;
 
       const messageData = {
         from: from,
@@ -173,6 +173,14 @@ class MailgunService {
         'h:Content-Type': 'text/html; charset=UTF-8',
         'h:Content-Transfer-Encoding': '8bit'
       };
+
+      // Threading headers if provided
+      if (inReplyTo) {
+        messageData['h:In-Reply-To'] = inReplyTo;
+      }
+      if (references && (Array.isArray(references) ? references.length : true)) {
+        messageData['h:References'] = Array.isArray(references) ? references.join(' ') : references;
+      }
 
       // Ekler varsa ekle
       if (attachments && attachments.length > 0) {

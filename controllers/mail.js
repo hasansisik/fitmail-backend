@@ -311,64 +311,55 @@ const sendMail = async (req, res, next) => {
       await user.save();
       console.log("Mail added to user's mail list. User ID:", userId);
 
-      // Aynı domain içi mail kontrolü - alıcıların inbox'ına da kaydet
-      const domain = process.env.MAIL_DOMAIN || 'gozdedijital.xyz';
-      for (const recipient of recipients) {
-        if (recipient.endsWith(`@${domain}`)) {
-          console.log(`Internal mail detected for recipient: ${recipient}`);
-          
-          // Alıcı kullanıcıyı bul
-          const recipientUser = await User.findOne({ mailAddress: recipient });
-          if (recipientUser) {
-            console.log(`Found recipient user: ${recipientUser._id}`);
-            
-            // Alıcı için unique messageId oluştur
-            let inboxMessageId = `inbox-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-            
-            // MessageId'nin unique olduğundan emin ol
-            let existingInboxMail = await Mail.findOne({ messageId: inboxMessageId });
-            while (existingInboxMail) {
-              inboxMessageId = `inbox-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-              existingInboxMail = await Mail.findOne({ messageId: inboxMessageId });
+      // Optional internal delivery fallback for same-domain recipients
+      if ((process.env.INTERNAL_DELIVERY_FALLBACK || '').toLowerCase() !== 'false') {
+        console.log('[INTERNAL_FALLBACK] Enabled for normal send');
+        const domain = process.env.MAIL_DOMAIN || 'gozdedijital.xyz';
+        for (const recipient of recipients) {
+          if (recipient.endsWith(`@${domain}`)) {
+            console.log(`[INTERNAL_FALLBACK] Creating inbox copy for ${recipient}`);
+            const recipientUser = await User.findOne({ mailAddress: recipient });
+            if (recipientUser) {
+              console.log(`[INTERNAL_FALLBACK] Recipient user found: ${recipientUser._id}`);
+              // Skip if webhook likely already created it (same mailgunId)
+              if (mailgunResult.messageId) {
+                const dup = await Mail.findOne({ user: recipientUser._id, mailgunId: mailgunResult.messageId });
+                if (dup) {
+                  console.log('[INTERNAL_FALLBACK] Skipped creating inbox copy (already exists via webhook)');
+                  continue;
+                }
+              }
+              let inboxMessageId = `inbox-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+              let existingInboxMail = await Mail.findOne({ messageId: inboxMessageId });
+              while (existingInboxMail) {
+                inboxMessageId = `inbox-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                existingInboxMail = await Mail.findOne({ messageId: inboxMessageId });
+              }
+              const inboxMailData = {
+                from: { email: user.mailAddress, name: `${user.name} ${user.surname}` },
+                to: [{ email: recipient, name: recipient.split('@')[0] }],
+                cc: ccRecipients.map(email => ({ email, name: email.split('@')[0] })),
+                bcc: bccRecipients.map(email => ({ email, name: email.split('@')[0] })),
+                subject,
+                content,
+                htmlContent: htmlContent || content,
+                folder: 'inbox',
+                status: 'delivered',
+                isRead: false,
+                labels: labels || [],
+                attachments: attachments || [],
+                user: recipientUser._id,
+                messageId: inboxMessageId,
+                inReplyTo: undefined,
+                receivedAt: new Date(),
+                mailgunId: mailgunResult.messageId
+              };
+              const inboxMail = new Mail(inboxMailData);
+              await inboxMail.save();
+              recipientUser.mails.push(inboxMail._id);
+              await recipientUser.save();
+              console.log(`[INTERNAL_FALLBACK] Inbox copy created: ${inboxMail._id}`);
             }
-            
-            // Alıcı için inbox'a bir kopya oluştur
-            const inboxMailData = {
-              from: {
-                email: user.mailAddress,
-                name: `${user.name} ${user.surname}`
-              },
-              to: [{
-                email: recipient,
-                name: recipient.split('@')[0]
-              }],
-              cc: ccRecipients.map(email => ({ email, name: email.split('@')[0] })),
-              bcc: bccRecipients.map(email => ({ email, name: email.split('@')[0] })),
-              subject,
-              content,
-              htmlContent: htmlContent || content,
-              folder: 'inbox',
-              status: 'delivered',
-              isRead: false,
-              labels: labels || [],
-              attachments: attachments || [],
-              user: recipientUser._id,
-              messageId: inboxMessageId, // Unique messageId
-              inReplyTo: uniqueMessageId, // Orijinal mail'in messageId'si
-              receivedAt: new Date(),
-              mailgunId: mailgunResult.messageId
-            };
-            
-            const inboxMail = new Mail(inboxMailData);
-            await inboxMail.save();
-            console.log(`Inbox mail created for recipient ${recipient}: ${inboxMail._id}`);
-            
-            // Alıcının mail listesine ekle
-            recipientUser.mails.push(inboxMail._id);
-            await recipientUser.save();
-            console.log(`Mail added to recipient's inbox. Recipient ID: ${recipientUser._id}`);
-          } else {
-            console.log(`Recipient user not found for: ${recipient}`);
           }
         }
       }
@@ -1308,6 +1299,20 @@ const handleMailgunWebhook = async (req, res, next) => {
   }
 };
 
+// Basit email çıkarma helper'ı ("Name <mail@domain>" → "mail@domain")
+const extractEmailAddress = (value) => {
+  if (!value || typeof value !== 'string') return value;
+  const match = value.match(/<([^>]+)>/);
+  if (match && match[1]) return match[1].trim();
+  // Eğer < > yoksa ve boşluk içeriyorsa son parçayı seç (çoğu durumda email olur)
+  if (value.includes(' ') && value.includes('@')) {
+    const parts = value.split(/\s+/);
+    const emailPart = parts.find((p) => p.includes('@'));
+    return emailPart ? emailPart.replace(/["'<>]/g, '').trim() : value.trim();
+  }
+  return value.trim();
+};
+
 // Webhook data işleme fonksiyonu
 const processWebhookData = async (webhookData, res) => {
   try {
@@ -1319,12 +1324,30 @@ const processWebhookData = async (webhookData, res) => {
 
     // Mailgun webhook verilerini parse et
     const recipient = webhookData['recipient'];
-    const sender = webhookData['sender'] || webhookData['from'] || 'unknown@example.com';
+    const senderRaw = webhookData['sender'] || webhookData['from'] || 'unknown@example.com';
+    const sender = extractEmailAddress(senderRaw);
     const subject = webhookData['subject'] || 'No Subject';
     const bodyPlain = webhookData['body-plain'] || webhookData['stripped-text'] || '';
     const bodyHtml = webhookData['body-html'] || webhookData['stripped-html'] || '';
     const timestamp = webhookData['timestamp'] ? parseInt(webhookData['timestamp']) : Date.now() / 1000;
     const messageId = webhookData['Message-Id'] || webhookData['message-id'] || `mg-${Date.now()}`;
+
+    // Parse threading headers
+    const inReplyToHeader = webhookData['In-Reply-To'] || webhookData['in-reply-to'] || null;
+    let referencesHeader = webhookData['References'] || webhookData['references'] || null;
+    let referencesArray = [];
+    if (referencesHeader) {
+      try {
+        // References header can be a space-separated list of message IDs
+        referencesArray = referencesHeader
+          .toString()
+          .split(/\s+/)
+          .map(ref => ref.trim())
+          .filter(Boolean);
+      } catch (e) {
+        referencesArray = [];
+      }
+    }
 
     // CC ve BCC bilgilerini parse et
     const cc = webhookData['cc'] ? webhookData['cc'].split(',').map(email => ({
@@ -1798,6 +1821,13 @@ const processWebhookData = async (webhookData, res) => {
       }
     }
 
+    // Optional auto-categorization (disabled by default)
+    const isAutoCategorizationEnabled = (process.env.AUTO_CATEGORIZATION || '').toLowerCase() === 'true';
+    if (!isAutoCategorizationEnabled) {
+      console.log('Auto-categorization disabled (set AUTO_CATEGORIZATION=true to enable)');
+      autoLabels.length = 0;
+      autoCategories.length = 0;
+    }
     console.log('Auto-generated labels:', autoLabels);
     console.log('Auto-generated categories:', autoCategories);
 
@@ -1808,6 +1838,17 @@ const processWebhookData = async (webhookData, res) => {
       // Eğer aynı messageId varsa, yeni bir tane oluştur
       uniqueMessageId = `${messageId}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       console.log(`Duplicate messageId detected, using new one: ${uniqueMessageId}`);
+    }
+
+    // Duplicate guard by mailgunId (Message-Id) to avoid double delivery with internal fallback
+    const existingByMailgunId = await Mail.findOne({ user: recipientUser._id, mailgunId: messageId });
+    if (existingByMailgunId) {
+      console.log('Duplicate webhook delivery detected, skipping mail creation for Message-Id:', messageId);
+      return res.status(StatusCodes.OK).json({
+        success: true,
+        message: 'Duplicate ignored',
+        mailgunId: messageId
+      });
     }
 
     // Mail objesi oluştur
@@ -1830,6 +1871,8 @@ const processWebhookData = async (webhookData, res) => {
       isRead: false,
       receivedAt: new Date(timestamp * 1000), // Unix timestamp to Date
       messageId: uniqueMessageId,
+      inReplyTo: inReplyToHeader || undefined,
+      references: referencesArray.length ? referencesArray : undefined,
       mailgunId: messageId,
       user: recipientUser._id,
       labels: autoLabels, // Otomatik etiketler
@@ -2243,49 +2286,57 @@ const processScheduledMails = async () => {
           await mail.save();
           console.log(`Scheduled mail sent successfully: ${mail._id}`);
 
-          // Aynı domain içi mail kontrolü
-          const domain = process.env.MAIL_DOMAIN || 'gozdedijital.xyz';
-          for (const recipient of mail.to) {
-            if (recipient.email.endsWith(`@${domain}`)) {
-              console.log(`Internal scheduled mail detected for recipient: ${recipient.email}`);
-              
-              const recipientUser = await User.findOne({ mailAddress: recipient.email });
-              if (recipientUser) {
-                let inboxMessageId = `inbox-scheduled-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-                let existingInboxMail = await Mail.findOne({ messageId: inboxMessageId });
-                while (existingInboxMail) {
-                  inboxMessageId = `inbox-scheduled-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-                  existingInboxMail = await Mail.findOne({ messageId: inboxMessageId });
+      // Optional internal delivery fallback for scheduled mails to same-domain recipients
+      if ((process.env.INTERNAL_DELIVERY_FALLBACK || '').toLowerCase() !== 'false') {
+        console.log('[INTERNAL_FALLBACK] Enabled for scheduled send');
+        const domain = process.env.MAIL_DOMAIN || 'gozdedijital.xyz';
+        for (const recipient of mail.to) {
+          if (recipient.email.endsWith(`@${domain}`)) {
+            console.log(`[INTERNAL_FALLBACK] Creating inbox copy for scheduled recipient ${recipient.email}`);
+            const recipientUser = await User.findOne({ mailAddress: recipient.email });
+            if (recipientUser) {
+              console.log(`[INTERNAL_FALLBACK] Recipient user found: ${recipientUser._id}`);
+              if (mailgunResult.messageId) {
+                const dup = await Mail.findOne({ user: recipientUser._id, mailgunId: mailgunResult.messageId });
+                if (dup) {
+                  console.log('[INTERNAL_FALLBACK] Skipped creating scheduled inbox copy (already exists via webhook)');
+                  continue;
                 }
-                
-                const inboxMailData = {
-                  from: mail.from,
-                  to: [{ email: recipient.email, name: recipient.name }],
-                  cc: mail.cc,
-                  bcc: mail.bcc,
-                  subject: mail.subject,
-                  content: mail.content,
-                  htmlContent: mail.htmlContent,
-                  folder: 'inbox',
-                  status: 'delivered',
-                  isRead: false,
-                  labels: mail.labels,
-                  attachments: mail.attachments,
-                  user: recipientUser._id,
-                  messageId: inboxMessageId,
-                  inReplyTo: mail.messageId,
-                  receivedAt: new Date(),
-                  mailgunId: mailgunResult.messageId
-                };
-                
-                const inboxMail = new Mail(inboxMailData);
-                await inboxMail.save();
-                recipientUser.mails.push(inboxMail._id);
-                await recipientUser.save();
-                console.log(`Inbox mail created for scheduled mail recipient ${recipient.email}`);
               }
+              let inboxMessageId = `inbox-scheduled-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+              let existingInboxMail = await Mail.findOne({ messageId: inboxMessageId });
+              while (existingInboxMail) {
+                inboxMessageId = `inbox-scheduled-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                existingInboxMail = await Mail.findOne({ messageId: inboxMessageId });
+              }
+              const inboxMailData = {
+                from: mail.from,
+                to: [{ email: recipient.email, name: recipient.name }],
+                cc: mail.cc,
+                bcc: mail.bcc,
+                subject: mail.subject,
+                content: mail.content,
+                htmlContent: mail.htmlContent,
+                folder: 'inbox',
+                status: 'delivered',
+                isRead: false,
+                labels: mail.labels,
+                attachments: mail.attachments,
+                user: recipientUser._id,
+                messageId: inboxMessageId,
+                inReplyTo: mail.messageId,
+                receivedAt: new Date(),
+                mailgunId: mailgunResult.messageId
+              };
+              const inboxMail = new Mail(inboxMailData);
+              await inboxMail.save();
+              recipientUser.mails.push(inboxMail._id);
+              await recipientUser.save();
+              console.log(`[INTERNAL_FALLBACK] Inbox copy created (scheduled): ${inboxMail._id}`);
             }
           }
+        }
+      }
         } else {
           // Gönderim başarısız
           mail.status = 'failed';
@@ -2405,13 +2456,16 @@ const addReplyToMail = async (req, res, next) => {
     console.log("Reply mail saved to database with ID:", replyMail._id);
 
     // Mailgun ile cevabı gönder
+    const recipientEmailClean = extractEmailAddress(originalMail.from.email);
     const mailgunData = {
       from: `${user.name} ${user.surname} <${user.mailAddress}>`,
-      to: originalMail.from.email,
+      to: recipientEmailClean,
       subject: replySubject,
       text: content,
       html: content.replace(/\n/g, '<br>'),
-      attachments: attachments || []
+      attachments: attachments || [],
+      inReplyTo: originalMail.messageId || originalMail._id.toString(),
+      references: originalMail.references ? [...originalMail.references, originalMail.messageId || originalMail._id.toString()] : [originalMail.messageId || originalMail._id.toString()]
     };
 
     console.log("Mailgun data for reply:", { ...mailgunData, attachments: mailgunData.attachments.map(att => ({ filename: att.filename, url: att.url })) });
@@ -2432,38 +2486,45 @@ const addReplyToMail = async (req, res, next) => {
       await user.save();
       console.log("Reply mail added to user's mail list. User ID:", userId);
 
-      // Aynı domain içi cevap kontrolü - alıcının inbox'ına da kaydet
+      // Optional internal delivery fallback for replies to same-domain recipients
       const domain = process.env.MAIL_DOMAIN || 'gozdedijital.xyz';
-      const recipientEmail = originalMail.from.email;
-      
-      if (recipientEmail.endsWith(`@${domain}`)) {
-        console.log(`Internal reply detected for recipient: ${recipientEmail}`);
-        
-        // Alıcı kullanıcıyı bul
+      const recipientEmail = extractEmailAddress(originalMail.from.email);
+      // Reply fallback is disabled by default to avoid duplicate deliveries; enable with INTERNAL_REPLY_FALLBACK=true
+      if ((process.env.INTERNAL_REPLY_FALLBACK || '').toLowerCase() === 'true' && recipientEmail.endsWith(`@${domain}`)) {
+        console.log('[INTERNAL_FALLBACK] Enabled for reply (INTERNAL_REPLY_FALLBACK=true)');
+        console.log(`[INTERNAL_FALLBACK] Creating inbox copy for reply to ${recipientEmail}`);
         const recipientUser = await User.findOne({ mailAddress: recipientEmail });
         if (recipientUser) {
-          console.log(`Found recipient user for reply: ${recipientUser._id}`);
-          
-          // Alıcı için unique messageId oluştur
+          console.log(`[INTERNAL_FALLBACK] Recipient user found: ${recipientUser._id}`);
+          if (mailgunResult.messageId) {
+            const dup = await Mail.findOne({ user: recipientUser._id, mailgunId: mailgunResult.messageId });
+            if (dup) {
+              console.log('[INTERNAL_FALLBACK] Skipped creating reply inbox copy (already exists via webhook)');
+              return res.status(StatusCodes.OK).json({
+                success: true,
+                message: "Cevap başarıyla gönderildi ve mail'e eklendi",
+                mail: originalMail,
+                replyMail: {
+                  _id: replyMail._id,
+                  subject: replyMail.subject,
+                  to: replyMail.to,
+                  status: replyMail.status,
+                  folder: replyMail.folder,
+                  sentAt: replyMail.sentAt
+                },
+                mailgunResult: mailgunResult
+              });
+            }
+          }
           let inboxReplyMessageId = `inbox-reply-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-          
-          // MessageId'nin unique olduğundan emin ol
           let existingInboxReply = await Mail.findOne({ messageId: inboxReplyMessageId });
           while (existingInboxReply) {
             inboxReplyMessageId = `inbox-reply-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
             existingInboxReply = await Mail.findOne({ messageId: inboxReplyMessageId });
           }
-          
-          // Alıcı için inbox'a bir kopya oluştur
           const inboxReplyData = {
-            from: {
-              email: user.mailAddress,
-              name: `${user.name} ${user.surname}`
-            },
-            to: [{
-              email: recipientEmail,
-              name: originalMail.from.name
-            }],
+            from: { email: user.mailAddress, name: `${user.name} ${user.surname}` },
+            to: [{ email: recipientEmail, name: originalMail.from.name }],
             cc: originalMail.cc || [],
             bcc: originalMail.bcc || [],
             subject: replySubject,
@@ -2475,42 +2536,18 @@ const addReplyToMail = async (req, res, next) => {
             labels: originalMail.labels || [],
             attachments: attachments || [],
             user: recipientUser._id,
-            messageId: inboxReplyMessageId, // Unique messageId
+            messageId: inboxReplyMessageId,
             inReplyTo: originalMail.messageId || originalMail._id.toString(),
             references: originalMail.references ? [...originalMail.references, originalMail.messageId || originalMail._id.toString()] : [originalMail.messageId || originalMail._id.toString()],
             receivedAt: new Date(),
             mailgunId: mailgunResult.messageId
           };
-          
           const inboxReply = new Mail(inboxReplyData);
           await inboxReply.save();
-          console.log(`Inbox reply created for recipient ${recipientEmail}: ${inboxReply._id}`);
-          
-          // Alıcının mail listesine ekle
           recipientUser.mails.push(inboxReply._id);
           await recipientUser.save();
-          console.log(`Reply added to recipient's inbox. Recipient ID: ${recipientUser._id}`);
-          
-          // Alıcının orijinal mailine de cevabı ekle
-          const recipientOriginalMail = await Mail.findOne({ 
-            user: recipientUser._id,
-            $or: [
-              { messageId: originalMail.messageId },
-              { _id: originalMail._id }
-            ]
-          });
-          
-          if (recipientOriginalMail) {
-            const recipientReplyData = {
-              sender: `${user.name} ${user.surname}`,
-              content: content,
-              isFromMe: false // Alıcı için bu cevap karşı taraftan geldi
-            };
-            await recipientOriginalMail.addReply(recipientReplyData);
-            console.log(`Reply added to recipient's original mail conversation`);
-          }
-        } else {
-          console.log(`Recipient user not found for reply: ${recipientEmail}`);
+          console.log(`[INTERNAL_FALLBACK] Inbox copy created (reply): ${inboxReply._id}`);
+          // Do not also mutate recipient's original mail conversation to avoid double entries in inbox
         }
       }
 
