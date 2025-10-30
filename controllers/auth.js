@@ -9,6 +9,18 @@ const bcrypt = require("bcrypt");
 const speakeasy = require("speakeasy");
 const qrcode = require("qrcode");
 
+// Helper: determine default profile picture by gender
+function getLogoByGender(gender) {
+  const g = (gender || 'other').toString().toLowerCase();
+  if (g === 'female' || g === 'kadın' || g === 'kadin' || g === 'woman') {
+    return "https://res.cloudinary.com/da2qwsrbv/image/upload/v1761845926/logo-women_mo2tgm.png";
+  }
+  if (g === 'male' || g === 'erkek' || g === 'man') {
+    return "https://res.cloudinary.com/da2qwsrbv/image/upload/v1761845926/logo-men_pnaezf.png";
+  }
+  return "https://res.cloudinary.com/da2qwsrbv/image/upload/v1761846110/logo-other_hkhjyf.png";
+}
+
 //Register
 const register = async (req, res, next) => {
   try {
@@ -72,8 +84,7 @@ const register = async (req, res, next) => {
 
     // Create Profile document
     const profile = new Profile({
-      picture:
-        picture || "https://res.cloudinary.com/da2qwsrbv/image/upload/v1759932330/F_punfds.png",
+      picture: picture || getLogoByGender(gender),
     });
     await profile.save();
 
@@ -256,9 +267,7 @@ const login = async (req, res, next) => {
         name: user.name,
         surname: user.surname,
         email: user.email,
-        picture:
-          user.profile?.picture ||
-          "https://res.cloudinary.com/da2qwsrbv/image/upload/v1759932330/F_punfds.png",
+        picture: user.profile?.picture || getLogoByGender(user.gender),
         status: user.status,
         courseTrial: user.courseTrial,
         theme: user.theme,
@@ -306,7 +315,7 @@ const getMyProfile = async (req, res, next) => {
     // Add picture property for consistency with login/register responses
     const userWithPicture = {
       ...user.toObject(),
-      picture: user.profile?.picture || "https://res.cloudinary.com/da2qwsrbv/image/upload/v1759932330/F_punfds.png"
+      picture: user.profile?.picture || getLogoByGender(user.gender)
     };
 
     res.status(200).json({
@@ -1043,7 +1052,7 @@ const googleAuth = async (req, res, next) => {
 
       // Create Profile document
       const profile = new Profile({
-        picture: "https://res.cloudinary.com/da2qwsrbv/image/upload/v1759932330/F_punfds.png",
+        picture: getLogoByGender('other'),
       });
       await profile.save();
 
@@ -1137,7 +1146,7 @@ const googleAuth = async (req, res, next) => {
         name: user.name,
         surname: user.surname,
         email: user.email,
-        picture: user.profile?.picture || picture || "https://res.cloudinary.com/da2qwsrbv/image/upload/v1759932330/F_punfds.png",
+        picture: user.profile?.picture || picture || getLogoByGender(user.gender),
         status: user.status,
         courseTrial: user.courseTrial,
         theme: user.theme,
@@ -1214,7 +1223,7 @@ const googleLogin = async (req, res, next) => {
         name: user.name,
         surname: user.surname,
         email: user.email,
-        picture: user.profile?.picture || picture || "https://res.cloudinary.com/da2qwsrbv/image/upload/v1759932330/F_punfds.png",
+        picture: user.profile?.picture || picture || getLogoByGender(user.gender),
         status: user.status,
         courseTrial: user.courseTrial,
         theme: user.theme,
@@ -1253,7 +1262,7 @@ const googleRegister = async (req, res, next) => {
 
     // Create Profile document
     const profile = new Profile({
-      picture: picture || "https://res.cloudinary.com/da2qwsrbv/image/upload/v1759932330/F_punfds.png",
+      picture: picture || getLogoByGender('other'),
     });
     await profile.save();
 
@@ -1748,7 +1757,7 @@ const verify2FALogin = async (req, res, next) => {
         name: user.name,
         surname: user.surname,
         email: user.email,
-        picture: user.profile?.picture || "https://res.cloudinary.com/da2qwsrbv/image/upload/v1759932330/F_punfds.png",
+        picture: user.profile?.picture || getLogoByGender(user.gender),
         status: user.status,
         courseTrial: user.courseTrial,
         theme: user.theme,
