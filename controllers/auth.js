@@ -13,12 +13,12 @@ const qrcode = require("qrcode");
 function getLogoByGender(gender) {
   const g = (gender || 'other').toString().toLowerCase();
   if (g === 'female' || g === 'kadın' || g === 'kadin' || g === 'woman') {
-    return "https://res.cloudinary.com/da2qwsrbv/image/upload/v1761845926/logo-women_mo2tgm.png";
+    return "https://res.cloudinary.com/da2qwsrbv/image/upload/v1762039722/noavatarerkek_e3s3lf.png";
   }
   if (g === 'male' || g === 'erkek' || g === 'man') {
-    return "https://res.cloudinary.com/da2qwsrbv/image/upload/v1761845926/logo-men_pnaezf.png";
+    return "https://res.cloudinary.com/da2qwsrbv/image/upload/v1762039722/noavatarkadin_goancm.png";
   }
-  return "https://res.cloudinary.com/da2qwsrbv/image/upload/v1761846110/logo-other_hkhjyf.png";
+  return "https://res.cloudinary.com/da2qwsrbv/image/upload/v1762039720/noavatardiger_ni9dqg.jpg";
 }
 
 //Register
@@ -155,7 +155,7 @@ const register = async (req, res, next) => {
       process.env.REFRESH_TOKEN_SECRET
     );
 
-    const cookieDomain = process.env.COOKIE_DOMAIN || '.gozdedijital.xyz';
+    const cookieDomain = process.env.COOKIE_DOMAIN || '.localhost:3000';
     res.cookie("accessToken", accessToken, {
       httpOnly: true,
       secure: true,
