@@ -155,23 +155,24 @@ const register = async (req, res, next) => {
       process.env.REFRESH_TOKEN_SECRET
     );
 
-    const cookieDomain = process.env.COOKIE_DOMAIN || '.localhost:3000';
-    res.cookie("accessToken", accessToken, {
+    // Cookie domain setup - localhost için domain ve secure ayarları
+    const cookieDomain = process.env.COOKIE_DOMAIN || undefined;
+    const isLocalhost = !cookieDomain || cookieDomain.includes('localhost');
+    const cookieOptions = {
       httpOnly: true,
-      secure: true,
-      sameSite: 'None',
-      domain: cookieDomain,
-      path: '/',
-      maxAge: 365 * 24 * 60 * 60 * 1000,
-    });
-    res.cookie("refreshToken", refreshToken, {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'None',
-      domain: cookieDomain,
+      secure: !isLocalhost, // Localhost'ta secure false olmalı (HTTPS yok)
+      sameSite: isLocalhost ? 'Lax' : 'None', // Localhost'ta None çalışmayabilir
       path: '/',
       maxAge: 365 * 24 * 60 * 60 * 1000, //365 days (1 year)
-    });
+    };
+    
+    // Domain sadece production'da set et (localhost'ta undefined)
+    if (cookieDomain && !isLocalhost) {
+      cookieOptions.domain = cookieDomain;
+    }
+    
+    res.cookie("accessToken", accessToken, cookieOptions);
+    res.cookie("refreshToken", refreshToken, cookieOptions);
 
     res.json({
       message:
