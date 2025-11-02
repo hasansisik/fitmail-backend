@@ -733,17 +733,20 @@ const editProfile = async (req, res) => {
       }
     }
 
-    // Handle phoneNumber
+    // Handle phoneNumber - boş string kabul et
     if (req.body.phoneNumber !== undefined) {
+      // Telefon numarasındaki boşlukları temizle
+      const cleanedPhone = req.body.phoneNumber ? req.body.phoneNumber.replace(/\s/g, '') : '';
+      
       if (!user.profile) {
         const profile = new Profile({
-          phoneNumber: req.body.phoneNumber,
+          phoneNumber: cleanedPhone,
           user: user._id,
         });
         await profile.save();
         user.profile = profile._id;
       } else {
-        user.profile.phoneNumber = req.body.phoneNumber;
+        user.profile.phoneNumber = cleanedPhone;
         await user.profile.save();
       }
     }
