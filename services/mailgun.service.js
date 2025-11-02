@@ -160,8 +160,7 @@ class MailgunService {
         // DKIM ve DMARC için önemli header'lar
         'h:Message-ID': `<${Date.now()}.${Math.random().toString(36).substr(2, 9)}@${this.domain}>`,
         'h:Date': new Date().toUTCString(),
-        'h:List-Unsubscribe': `<mailto:unsubscribe@${this.domain}>`,
-        'h:List-Id': `Fitmail <${this.domain}>`,
+        // List-Unsubscribe ve List-Id header'ları kaldırıldı - normal maillerin promotions kategorisine düşmemesi için
         // SPF, DKIM, DMARC için gerekli header'lar
         'h:X-Mailer': 'Fitmail Mail System',
         'h:X-Priority': '3',

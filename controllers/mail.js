@@ -251,6 +251,7 @@ const sendMail = async (req, res, next) => {
       folder: 'sent',
       status: 'draft', // Draft olarak başla, gönderim başarılı olursa 'sent' olacak
       labels: labels || [],
+      categories: [], // Normal maillerin promotions kategorisine düşmemesi için categories boş
       attachments: attachments || [],
       user: userId
     };
@@ -347,6 +348,7 @@ const sendMail = async (req, res, next) => {
                 status: 'delivered',
                 isRead: false,
                 labels: labels || [],
+                categories: [], // Normal maillerin promotions kategorisine düşmemesi için categories boş
                 attachments: attachments || [],
                 user: recipientUser._id,
                 messageId: inboxMessageId,
@@ -1177,12 +1179,44 @@ const handleMailgunWebhook = async (req, res, next) => {
     console.log('📎 Files:', req.files ? req.files.map(f => ({ fieldname: f.fieldname, originalname: f.originalname, mimetype: f.mimetype, size: f.size })) : 'No files');
     console.log('📄 Content-Type:', req.headers['content-type']);
     
-    // Gmail kontrolü
-    const sender = req.body?.sender || req.body?.from || req.body?.['Return-Path'] || '';
-    if (sender && sender.includes('@gmail.com')) {
-      console.log('📧 GMAIL DETECTED! Sender:', sender);
+    // Gmail kontrolü - tüm olası sender alanlarını kontrol et
+    const sender = req.body?.sender || req.body?.from || req.body?.['Return-Path'] || req.body?.['X-Sender'] || '';
+    const senderEmail = typeof sender === 'string' ? sender : '';
+    
+    if (senderEmail && (senderEmail.includes('@gmail.com') || senderEmail.includes('googlemail.com'))) {
+      console.log('📧 ===== GMAIL MAIL DETECTED! =====');
+      console.log('📧 Sender:', sender);
       console.log('📧 Recipient:', req.body?.recipient);
       console.log('📧 Subject:', req.body?.subject);
+      console.log('📧 Message-ID:', req.body?.['Message-Id'] || req.body?.['message-id']);
+      console.log('📧 In-Reply-To:', req.body?.['In-Reply-To'] || req.body?.['in-reply-to']);
+      console.log('📧 References:', req.body?.['References'] || req.body?.['references']);
+      console.log('📧 Spam Score:', req.body?.['X-Mailgun-Sscore'] || req.body?.['X-Spam-Score']);
+      console.log('📧 Spam Flag:', req.body?.['X-Mailgun-Flag'] || req.body?.['X-Spam-Flag']);
+      
+      // Tüm Gmail/Google ile ilgili key'leri listele
+      const gmailKeys = Object.keys(req.body || {}).filter(k => 
+        k.toLowerCase().includes('gmail') || 
+        k.toLowerCase().includes('google') ||
+        k.toLowerCase().includes('sender') ||
+        k.toLowerCase().includes('from') ||
+        k.toLowerCase().includes('reply')
+      );
+      console.log('📧 Gmail-related keys:', gmailKeys);
+      console.log('📧 ==================================');
+    }
+    
+    // Reply kontrolü
+    const subject = req.body?.subject || '';
+    const isReplyFromSubject = subject.toLowerCase().startsWith('re:') || 
+                              subject.toLowerCase().startsWith('fw:') || 
+                              subject.toLowerCase().startsWith('fwd:');
+    if (isReplyFromSubject || req.body?.['In-Reply-To'] || req.body?.['in-reply-to']) {
+      console.log('📧 ===== REPLY MAIL DETECTED! =====');
+      console.log('📧 Subject:', subject);
+      console.log('📧 In-Reply-To:', req.body?.['In-Reply-To'] || req.body?.['in-reply-to']);
+      console.log('📧 References:', req.body?.['References'] || req.body?.['references']);
+      console.log('📧 =================================');
     }
     
     console.log('================================');
@@ -1355,22 +1389,55 @@ const processWebhookData = async (webhookData, res) => {
     console.log('📧 Webhook data keys:', Object.keys(webhookData));
     console.log('📧 Full webhook data:', JSON.stringify(webhookData, null, 2));
     
-    // Mailgun webhook verisini kontrol et
-    if (!webhookData || !webhookData['recipient']) {
+    // Mailgun webhook verisini kontrol et - recipient'ı farklı alanlarda ara
+    let recipient = webhookData['recipient'] || 
+                    webhookData['To'] || 
+                    webhookData['to'] || 
+                    webhookData['X-Recipient'] ||
+                    webhookData['X-Original-To'] ||
+                    null;
+    
+    if (!recipient && webhookData['to'] && typeof webhookData['to'] === 'string') {
+      // "Name <email@domain>" formatından email'i çıkar
+      recipient = extractEmailAddress(webhookData['to']);
+    }
+    
+    if (!webhookData || !recipient) {
       console.log('❌ Invalid webhook data - missing recipient');
       console.log('Available keys:', Object.keys(webhookData || {}));
+      console.log('All recipient-related keys:', Object.keys(webhookData || {}).filter(k => 
+        k.toLowerCase().includes('recipient') || 
+        k.toLowerCase().includes('to') ||
+        k.toLowerCase() === 'to'
+      ));
       return res.status(StatusCodes.OK).json({ message: 'Webhook received but no recipient' });
     }
-
+    
+    console.log('✅ Recipient found:', recipient);
+    
     // Mailgun webhook verilerini parse et
-    const recipient = webhookData['recipient'];
-    const senderRaw = webhookData['sender'] || webhookData['from'] || webhookData['Return-Path'] || 'unknown@example.com';
+    const senderRaw = webhookData['sender'] || webhookData['from'] || webhookData['Return-Path'] || webhookData['X-Sender'] || 'unknown@example.com';
     const sender = extractEmailAddress(senderRaw);
     const subject = webhookData['subject'] || 'No Subject';
     const bodyPlain = webhookData['body-plain'] || webhookData['stripped-text'] || webhookData['body-plain'] || '';
     const bodyHtml = webhookData['body-html'] || webhookData['stripped-html'] || webhookData['body-html'] || '';
     const timestamp = webhookData['timestamp'] ? parseInt(webhookData['timestamp']) : Date.now() / 1000;
-    const messageId = webhookData['Message-Id'] || webhookData['message-id'] || webhookData['Message-ID'] || `mg-${Date.now()}`;
+    const messageId = webhookData['Message-Id'] || webhookData['message-id'] || webhookData['Message-ID'] || webhookData['message_id'] || `mg-${Date.now()}`;
+
+    // Spam kontrolü - Mailgun spam score
+    const spamScore = webhookData['X-Mailgun-Sscore'] || webhookData['X-Spam-Score'] || webhookData['spam-score'] || null;
+    const isSpam = webhookData['X-Mailgun-Flag'] === 'yes' || 
+                   webhookData['X-Spam-Flag'] === 'yes' || 
+                   (spamScore && parseFloat(spamScore) > 5.0);
+    
+    // Reply kontrolü - Subject veya header'lardan
+    const isReply = subject.toLowerCase().startsWith('re:') || 
+                   subject.toLowerCase().startsWith('fw:') || 
+                   subject.toLowerCase().startsWith('fwd:') ||
+                   webhookData['In-Reply-To'] || 
+                   webhookData['in-reply-to'] ||
+                   webhookData['References'] ||
+                   webhookData['references'];
 
     console.log('📨 Parsed email data:');
     console.log('   Recipient:', recipient);
@@ -1379,8 +1446,24 @@ const processWebhookData = async (webhookData, res) => {
     console.log('   Subject:', subject);
     console.log('   Message ID:', messageId);
     console.log('   Is Gmail?', sender.includes('@gmail.com'));
+    console.log('   Spam Score:', spamScore);
+    console.log('   Is Spam?', isSpam);
+    console.log('   Is Reply?', isReply);
     console.log('   Body Plain length:', bodyPlain.length);
     console.log('   Body HTML length:', bodyHtml.length);
+    
+    // Gmail için özel loglar
+    if (sender.includes('@gmail.com')) {
+      console.log('📧 GMAIL MAIL DETAILS:');
+      console.log('   Full sender raw:', senderRaw);
+      console.log('   All Gmail-related keys:', Object.keys(webhookData).filter(k => k.toLowerCase().includes('gmail') || k.toLowerCase().includes('google')));
+      console.log('   Headers:', JSON.stringify(Object.keys(webhookData).reduce((acc, key) => {
+        if (key.toLowerCase().includes('header') || key.toLowerCase().includes('x-')) {
+          acc[key] = webhookData[key];
+        }
+        return acc;
+      }, {}), null, 2));
+    }
 
     // Parse threading headers
     const inReplyToHeader = webhookData['In-Reply-To'] || webhookData['in-reply-to'] || null;
@@ -1422,9 +1505,16 @@ const processWebhookData = async (webhookData, res) => {
       subject,
       messageId,
       timestamp: new Date(timestamp * 1000),
-      isReply: subject.toLowerCase().startsWith('re:'),
-      isGmail: sender.includes('@gmail.com')
+      isReply: isReply,
+      isGmail: sender.includes('@gmail.com'),
+      isSpam: isSpam,
+      spamScore: spamScore
     });
+    
+    // Spam olarak işaretlenmiş olsa bile yakalayalım (spam klasörüne koyarız)
+    if (isSpam) {
+      console.log('⚠️ Mail spam olarak işaretlenmiş, yine de yakalıyoruz (spam klasörüne gidecek)');
+    }
 
     // Alıcı kullanıcıyı bul - mailAddress alanında ara
     console.log('🔍 Searching for recipient user with mailAddress:', recipient);
@@ -1923,6 +2013,19 @@ const processWebhookData = async (webhookData, res) => {
 
     // Mail objesi oluştur
     console.log('📝 Creating mail object...');
+    
+    // Folder belirleme: Spam ise spam klasörüne, değilse inbox'a
+    // Spam olsa bile yakalıyoruz (kullanıcı kontrol edebilir)
+    const mailFolder = isSpam ? 'spam' : 'inbox';
+    
+    // Gmail ve reply kontrolü
+    if (sender.includes('@gmail.com')) {
+      console.log('📧 Gmail mail yakalanıyor - folder:', mailFolder);
+    }
+    if (isReply) {
+      console.log('📧 Reply mail yakalanıyor - folder:', mailFolder);
+    }
+    
     const mailData = {
       from: {
         email: sender,
@@ -1937,7 +2040,7 @@ const processWebhookData = async (webhookData, res) => {
       subject,
       content: bodyPlain,
       htmlContent: bodyHtml || bodyPlain,
-      folder: 'inbox',
+      folder: mailFolder, // Spam ise spam, değilse inbox
       status: 'delivered',
       isRead: false,
       receivedAt: new Date(timestamp * 1000), // Unix timestamp to Date
@@ -1948,7 +2051,8 @@ const processWebhookData = async (webhookData, res) => {
       user: recipientUser._id,
       labels: autoLabels, // Otomatik etiketler
       categories: autoCategories, // Otomatik kategoriler
-      attachments: attachments // Attachment'ları ekle
+      attachments: attachments, // Attachment'ları ekle
+      spamScore: spamScore ? parseFloat(spamScore) : null // Spam score'u kaydet
     };
 
     console.log('📧 Mail data prepared:', {
@@ -2237,6 +2341,7 @@ const scheduleMailForLater = async (req, res, next) => {
       folder: 'scheduled',
       status: 'scheduled',
       labels: labels || [],
+      categories: [], // Normal maillerin promotions kategorisine düşmemesi için categories boş
       attachments: attachments || [],
       user: userId,
       messageId: uniqueMessageId,
@@ -2511,7 +2616,8 @@ const processScheduledMails = async () => {
                 folder: 'inbox',
                 status: 'delivered',
                 isRead: false,
-                labels: mail.labels,
+                labels: mail.labels || [],
+                categories: [], // Normal maillerin promotions kategorisine düşmemesi için categories boş
                 attachments: mail.attachments,
                 user: recipientUser._id,
                 messageId: inboxMessageId,
@@ -2634,6 +2740,7 @@ const addReplyToMail = async (req, res, next) => {
       folder: 'sent',
       status: 'draft', // Draft olarak başla, gönderim başarılı olursa 'sent' olacak
       labels: originalMail.labels || [],
+      categories: [], // Normal maillerin promotions kategorisine düşmemesi için categories boş
       attachments: attachments || [],
       user: userId,
       messageId: uniqueMessageId, // Unique messageId ekle
@@ -2725,6 +2832,7 @@ const addReplyToMail = async (req, res, next) => {
             status: 'delivered',
             isRead: false,
             labels: originalMail.labels || [],
+            categories: [], // Normal maillerin promotions kategorisine düşmemesi için categories boş
             attachments: attachments || [],
             user: recipientUser._id,
             messageId: inboxReplyMessageId,
