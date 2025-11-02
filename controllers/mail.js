@@ -860,7 +860,8 @@ const getMailStats = async (req, res, next) => {
           updates: { $sum: { $cond: [{ $and: [{ $in: ['updates', { $ifNull: ['$categories', []] }] }, { $eq: ['$isRead', false] }] }, 1, 0] } },
           forums: { $sum: { $cond: [{ $and: [{ $in: ['forums', { $ifNull: ['$categories', []] }] }, { $eq: ['$isRead', false] }] }, 1, 0] } },
           shopping: { $sum: { $cond: [{ $and: [{ $in: ['shopping', { $ifNull: ['$categories', []] }] }, { $eq: ['$isRead', false] }] }, 1, 0] } },
-          promotions: { $sum: { $cond: [{ $and: [{ $in: ['promotions', { $ifNull: ['$categories', []] }] }, { $eq: ['$isRead', false] }] }, 1, 0] } }
+          promotions: { $sum: { $cond: [{ $and: [{ $in: ['promotions', { $ifNull: ['$categories', []] }] }, { $eq: ['$isRead', false] }] }, 1, 0] } },
+          scheduled: { $sum: { $cond: [{ $and: [{ $eq: ['$folder', 'scheduled'] }, { $eq: ['$status', 'scheduled'] }] }, 1, 0] } }
         }
       }
     ]);
@@ -879,7 +880,8 @@ const getMailStats = async (req, res, next) => {
       updates: 0,
       forums: 0,
       shopping: 0,
-      promotions: 0
+      promotions: 0,
+      scheduled: 0
     };
 
 
@@ -2227,6 +2229,84 @@ const cancelScheduledMail = async (req, res, next) => {
   }
 };
 
+// Planlı mail'i düzenle
+const updateScheduledMail = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { scheduledSendAt, to, subject, content, htmlContent, cc, bcc } = req.body;
+    const userId = req.user.userId;
+    const files = req.files || [];
+
+    console.log("updateScheduledMail request body:", req.body);
+    console.log("updateScheduledMail files:", files);
+
+    const mail = await Mail.findOne({ _id: id, user: userId, status: 'scheduled', folder: 'scheduled' });
+    if (!mail) {
+      throw new CustomError.NotFoundError("Planlı mail bulunamadı");
+    }
+
+    // Tarih güncelleniyorsa kontrol et
+    if (scheduledSendAt) {
+      const scheduledDate = new Date(scheduledSendAt);
+      const now = new Date();
+      
+      if (scheduledDate <= now) {
+        throw new CustomError.BadRequestError("Planlı gönderim tarihi gelecekte olmalıdır");
+      }
+      
+      mail.scheduledSendAt = scheduledDate;
+    }
+
+    // Diğer alanları güncelle
+    if (to) {
+      const recipients = Array.isArray(to) ? to : JSON.parse(to);
+      mail.to = recipients.map(email => ({ email, name: email.split('@')[0] }));
+    }
+    
+    if (cc) {
+      const ccRecipients = Array.isArray(cc) ? cc : JSON.parse(cc);
+      mail.cc = ccRecipients.map(email => ({ email, name: email.split('@')[0] }));
+    }
+    
+    if (bcc) {
+      const bccRecipients = Array.isArray(bcc) ? bcc : JSON.parse(bcc);
+      mail.bcc = bccRecipients.map(email => ({ email, name: email.split('@')[0] }));
+    }
+    
+    if (subject !== undefined) mail.subject = subject;
+    if (content !== undefined) mail.content = content;
+    if (htmlContent !== undefined) mail.htmlContent = htmlContent;
+
+    // Attachment'ları güncelle
+    if (files.length > 0) {
+      const attachmentNames = req.body.attachmentNames ? JSON.parse(req.body.attachmentNames) : [];
+      const attachmentTypes = req.body.attachmentTypes ? JSON.parse(req.body.attachmentTypes) : [];
+      const attachmentUrls = req.body.attachmentUrls ? JSON.parse(req.body.attachmentUrls) : [];
+
+      const newAttachments = files.map((file, index) => ({
+        filename: attachmentNames[index] || file.originalname,
+        data: file.buffer,
+        contentType: attachmentTypes[index] || file.mimetype,
+        size: file.size,
+        url: attachmentUrls[index] || null
+      }));
+
+      // Mevcut attachment'ları koru ve yenilerini ekle
+      mail.attachments = [...(mail.attachments || []), ...newAttachments];
+    }
+
+    await mail.save();
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      message: "Planlı mail başarıyla güncellendi",
+      mail: mail
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // Planlı mailleri kontrol et ve gönder (cron job için)
 const processScheduledMails = async () => {
   try {
@@ -2623,5 +2703,6 @@ module.exports = {
   scheduleMailForLater,
   getScheduledMails,
   cancelScheduledMail,
+  updateScheduledMail,
   processScheduledMails
 };

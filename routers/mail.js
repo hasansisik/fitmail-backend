@@ -33,7 +33,8 @@ const {
   fixGmailAttachmentUrls,
   scheduleMailForLater,
   getScheduledMails,
-  cancelScheduledMail
+  cancelScheduledMail,
+  updateScheduledMail
 } = require('../controllers/mail');
 const { isAuthenticated } = require('../middleware/authMiddleware');
 
@@ -144,5 +145,6 @@ router.post('/fix-gmail-urls', isAuthenticated, fixGmailAttachmentUrls);
 router.post('/schedule', isAuthenticated, upload.array('attachments', 5), scheduleMailForLater);
 router.get('/scheduled/list', isAuthenticated, getScheduledMails);
 router.post('/:id/cancel-schedule', isAuthenticated, cancelScheduledMail);
+router.patch('/:id/update-schedule', isAuthenticated, upload.array('attachments', 5), updateScheduledMail);
 
 module.exports = router;
