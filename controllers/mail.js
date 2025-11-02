@@ -1172,10 +1172,19 @@ const testWebhook = async (req, res, next) => {
 const handleMailgunWebhook = async (req, res, next) => {
   try {
     console.log('=== MAILGUN WEBHOOK RECEIVED ===');
-    console.log('Headers:', JSON.stringify(req.headers, null, 2));
-    console.log('Body:', JSON.stringify(req.body, null, 2));
-    console.log('Files:', req.files ? req.files.map(f => ({ fieldname: f.fieldname, originalname: f.originalname, mimetype: f.mimetype, size: f.size })) : 'No files');
-    console.log('Content-Type:', req.headers['content-type']);
+    console.log('📥 Headers:', JSON.stringify(req.headers, null, 2));
+    console.log('📦 Body:', JSON.stringify(req.body, null, 2));
+    console.log('📎 Files:', req.files ? req.files.map(f => ({ fieldname: f.fieldname, originalname: f.originalname, mimetype: f.mimetype, size: f.size })) : 'No files');
+    console.log('📄 Content-Type:', req.headers['content-type']);
+    
+    // Gmail kontrolü
+    const sender = req.body?.sender || req.body?.from || req.body?.['Return-Path'] || '';
+    if (sender && sender.includes('@gmail.com')) {
+      console.log('📧 GMAIL DETECTED! Sender:', sender);
+      console.log('📧 Recipient:', req.body?.recipient);
+      console.log('📧 Subject:', req.body?.subject);
+    }
+    
     console.log('================================');
 
     let webhookData = req.body;
@@ -1303,36 +1312,75 @@ const handleMailgunWebhook = async (req, res, next) => {
 
 // Basit email çıkarma helper'ı ("Name <mail@domain>" → "mail@domain")
 const extractEmailAddress = (value) => {
-  if (!value || typeof value !== 'string') return value;
+  if (!value || typeof value !== 'string') {
+    console.log('⚠️ extractEmailAddress: Invalid value (not a string):', value);
+    return value;
+  }
+  
+  const originalValue = value;
   const match = value.match(/<([^>]+)>/);
-  if (match && match[1]) return match[1].trim();
+  if (match && match[1]) {
+    const extracted = match[1].trim();
+    if (extracted.includes('@gmail.com')) {
+      console.log('📧 Gmail email extracted:', { original: originalValue, extracted });
+    }
+    return extracted;
+  }
+  
   // Eğer < > yoksa ve boşluk içeriyorsa son parçayı seç (çoğu durumda email olur)
   if (value.includes(' ') && value.includes('@')) {
     const parts = value.split(/\s+/);
     const emailPart = parts.find((p) => p.includes('@'));
-    return emailPart ? emailPart.replace(/["'<>]/g, '').trim() : value.trim();
+    const result = emailPart ? emailPart.replace(/["'<>]/g, '').trim() : value.trim();
+    if (result.includes('@gmail.com')) {
+      console.log('📧 Gmail email extracted (space-separated):', { original: originalValue, extracted: result });
+    }
+    return result;
   }
-  return value.trim();
+  
+  const trimmed = value.trim();
+  if (trimmed.includes('@gmail.com')) {
+    console.log('📧 Gmail email (direct):', trimmed);
+  }
+  return trimmed;
 };
 
 // Webhook data işleme fonksiyonu
 const processWebhookData = async (webhookData, res) => {
+  // Webhook data'yı sakla (hata durumunda kullanmak için)
+  const originalWebhookData = webhookData;
+  
   try {
+    console.log('=== PROCESSING WEBHOOK DATA ===');
+    console.log('📧 Webhook data keys:', Object.keys(webhookData));
+    console.log('📧 Full webhook data:', JSON.stringify(webhookData, null, 2));
+    
     // Mailgun webhook verisini kontrol et
     if (!webhookData || !webhookData['recipient']) {
-      console.log('Invalid webhook data - missing recipient');
+      console.log('❌ Invalid webhook data - missing recipient');
+      console.log('Available keys:', Object.keys(webhookData || {}));
       return res.status(StatusCodes.OK).json({ message: 'Webhook received but no recipient' });
     }
 
     // Mailgun webhook verilerini parse et
     const recipient = webhookData['recipient'];
-    const senderRaw = webhookData['sender'] || webhookData['from'] || 'unknown@example.com';
+    const senderRaw = webhookData['sender'] || webhookData['from'] || webhookData['Return-Path'] || 'unknown@example.com';
     const sender = extractEmailAddress(senderRaw);
     const subject = webhookData['subject'] || 'No Subject';
-    const bodyPlain = webhookData['body-plain'] || webhookData['stripped-text'] || '';
-    const bodyHtml = webhookData['body-html'] || webhookData['stripped-html'] || '';
+    const bodyPlain = webhookData['body-plain'] || webhookData['stripped-text'] || webhookData['body-plain'] || '';
+    const bodyHtml = webhookData['body-html'] || webhookData['stripped-html'] || webhookData['body-html'] || '';
     const timestamp = webhookData['timestamp'] ? parseInt(webhookData['timestamp']) : Date.now() / 1000;
-    const messageId = webhookData['Message-Id'] || webhookData['message-id'] || `mg-${Date.now()}`;
+    const messageId = webhookData['Message-Id'] || webhookData['message-id'] || webhookData['Message-ID'] || `mg-${Date.now()}`;
+
+    console.log('📨 Parsed email data:');
+    console.log('   Recipient:', recipient);
+    console.log('   Sender Raw:', senderRaw);
+    console.log('   Sender (extracted):', sender);
+    console.log('   Subject:', subject);
+    console.log('   Message ID:', messageId);
+    console.log('   Is Gmail?', sender.includes('@gmail.com'));
+    console.log('   Body Plain length:', bodyPlain.length);
+    console.log('   Body HTML length:', bodyHtml.length);
 
     // Parse threading headers
     const inReplyToHeader = webhookData['In-Reply-To'] || webhookData['in-reply-to'] || null;
@@ -1367,7 +1415,7 @@ const processWebhookData = async (webhookData, res) => {
       ? webhookData['sender'].split('<')[0].trim().replace(/"/g, '')
       : sender.split('@')[0];
 
-    console.log('Processing mail:', {
+    console.log('📨 Processing mail:', {
       recipient,
       sender,
       senderName,
@@ -1379,15 +1427,28 @@ const processWebhookData = async (webhookData, res) => {
     });
 
     // Alıcı kullanıcıyı bul - mailAddress alanında ara
+    console.log('🔍 Searching for recipient user with mailAddress:', recipient);
     const recipientUser = await User.findOne({ mailAddress: recipient });
 
     if (!recipientUser) {
-      console.log('Recipient user not found for mail address:', recipient);
+      console.log('❌ Recipient user not found for mail address:', recipient);
+      console.log('🔍 Attempting to find user by email in database...');
+      
+      // Alternatif arama - belki farklı bir formatta kaydedilmiş olabilir
+      const allUsers = await User.find({}).select('mailAddress name').limit(10);
+      console.log('📋 Sample users in database:', allUsers.map(u => ({ id: u._id, mailAddress: u.mailAddress, name: u.name })));
+      
       return res.status(StatusCodes.OK).json({
         message: 'User not found but webhook accepted',
         recipient: recipient
       });
     }
+
+    console.log('✅ Recipient user found:', {
+      userId: recipientUser._id,
+      name: recipientUser.name,
+      mailAddress: recipientUser.mailAddress
+    });
 
     // Attachment'ları parse et - Gmail için geliştirilmiş parsing
     const attachments = [];
@@ -1834,26 +1895,34 @@ const processWebhookData = async (webhookData, res) => {
     console.log('Auto-generated categories:', autoCategories);
 
     // MessageId'nin unique olduğundan emin ol
+    console.log('🔍 Checking for duplicate messageId:', messageId);
     let uniqueMessageId = messageId;
     const existingMail = await Mail.findOne({ messageId: messageId });
     if (existingMail) {
       // Eğer aynı messageId varsa, yeni bir tane oluştur
       uniqueMessageId = `${messageId}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      console.log(`Duplicate messageId detected, using new one: ${uniqueMessageId}`);
+      console.log(`⚠️ Duplicate messageId detected, using new one: ${uniqueMessageId}`);
+    } else {
+      console.log('✅ MessageId is unique');
     }
 
     // Duplicate guard by mailgunId (Message-Id) to avoid double delivery with internal fallback
+    console.log('🔍 Checking for duplicate mailgunId:', messageId);
     const existingByMailgunId = await Mail.findOne({ user: recipientUser._id, mailgunId: messageId });
     if (existingByMailgunId) {
-      console.log('Duplicate webhook delivery detected, skipping mail creation for Message-Id:', messageId);
+      console.log('⚠️ Duplicate webhook delivery detected, skipping mail creation for Message-Id:', messageId);
+      console.log('📋 Existing mail ID:', existingByMailgunId._id);
       return res.status(StatusCodes.OK).json({
         success: true,
         message: 'Duplicate ignored',
         mailgunId: messageId
       });
+    } else {
+      console.log('✅ No duplicate mailgunId found');
     }
 
     // Mail objesi oluştur
+    console.log('📝 Creating mail object...');
     const mailData = {
       from: {
         email: sender,
@@ -1882,22 +1951,42 @@ const processWebhookData = async (webhookData, res) => {
       attachments: attachments // Attachment'ları ekle
     };
 
+    console.log('📧 Mail data prepared:', {
+      from: mailData.from,
+      to: mailData.to,
+      subject: mailData.subject,
+      messageId: mailData.messageId,
+      attachmentsCount: mailData.attachments.length,
+      labels: mailData.labels,
+      categories: mailData.categories
+    });
+
     // Mail'i veritabanına kaydet
+    console.log('💾 Saving mail to database...');
     const mail = new Mail(mailData);
     await mail.save();
+    console.log('✅ Mail saved successfully with ID:', mail._id);
 
     // Kullanıcının mail listesine ekle (eğer mails array'i varsa)
     if (recipientUser.mails) {
+      console.log('📋 Adding mail to user mails array...');
       recipientUser.mails.push(mail._id);
       await recipientUser.save();
+      console.log('✅ Mail added to user mails array');
+    } else {
+      console.log('⚠️ User mails array does not exist, skipping...');
     }
 
-    console.log('Mail saved successfully:', {
+    console.log('✅ Mail saved successfully:', {
       mailId: mail._id,
       recipient: recipient,
       subject: subject,
-      receivedAt: mail.receivedAt
+      sender: sender,
+      isGmail: sender.includes('@gmail.com'),
+      receivedAt: mail.receivedAt,
+      attachmentsCount: attachments.length
     });
+    console.log('=== WEBHOOK PROCESSING COMPLETE ===');
 
     res.status(StatusCodes.OK).json({
       success: true,
@@ -1906,7 +1995,29 @@ const processWebhookData = async (webhookData, res) => {
       recipient: recipient
     });
   } catch (error) {
-    console.error('Webhook processing error:', error);
+    console.error('❌ Webhook processing error:', error);
+    console.error('❌ Error stack:', error.stack);
+    console.error('❌ Error name:', error.name);
+    console.error('❌ Error message:', error.message);
+    
+    // Gmail'den gelen mail için özel log
+    try {
+      if (originalWebhookData && originalWebhookData['sender']) {
+        const sender = extractEmailAddress(originalWebhookData['sender'] || originalWebhookData['from'] || originalWebhookData['Return-Path'] || '');
+        if (sender.includes('@gmail.com')) {
+          console.error('🚨 GMAIL MAIL PROCESSING ERROR:', {
+            sender: sender,
+            recipient: originalWebhookData['recipient'],
+            subject: originalWebhookData['subject'],
+            error: error.message,
+            errorStack: error.stack
+          });
+        }
+      }
+    } catch (logError) {
+      console.error('Error logging Gmail details:', logError);
+    }
+    
     // Webhook hatalarında hata döndürme, Mailgun tekrar deneyebilir
     res.status(StatusCodes.OK).json({
       message: 'Webhook received but processing failed',
