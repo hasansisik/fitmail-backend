@@ -1173,11 +1173,23 @@ const testWebhook = async (req, res, next) => {
 // Mailgun webhook handler - gelen mailleri almak için
 const handleMailgunWebhook = async (req, res, next) => {
   try {
+    // Hemen 200 döndür - Mailgun'un tekrar denemesini engelle
+    res.status(StatusCodes.OK);
+    
     console.log('=== MAILGUN WEBHOOK RECEIVED ===');
+    console.log('📥 Method:', req.method);
+    console.log('📥 URL:', req.url);
+    console.log('📥 Path:', req.path);
     console.log('📥 Headers:', JSON.stringify(req.headers, null, 2));
     console.log('📦 Body:', JSON.stringify(req.body, null, 2));
     console.log('📎 Files:', req.files ? req.files.map(f => ({ fieldname: f.fieldname, originalname: f.originalname, mimetype: f.mimetype, size: f.size })) : 'No files');
     console.log('📄 Content-Type:', req.headers['content-type']);
+    
+    // Eğer body boşsa ve multipart/form-data değilse, bu bir test isteği olabilir
+    if (!req.body || Object.keys(req.body).length === 0) {
+      console.log('⚠️ Empty webhook body - might be a test request');
+      return res.json({ message: 'Webhook endpoint is working', status: 'ok' });
+    }
     
     // Gmail kontrolü - tüm olası sender alanlarını kontrol et
     const sender = req.body?.sender || req.body?.from || req.body?.['Return-Path'] || req.body?.['X-Sender'] || '';
@@ -1333,8 +1345,9 @@ const handleMailgunWebhook = async (req, res, next) => {
       webhookData['_multerProcessed'] = true;
     }
 
-    // Normal webhook işleme
-    processWebhookData(webhookData, res);
+    // Normal webhook işleme - res zaten 200 olarak ayarlandı
+    // processWebhookData fonksiyonuna res gönder, o response'u gönderecek
+    await processWebhookData(webhookData, res);
   } catch (error) {
     console.error('Webhook error:', error);
     res.status(StatusCodes.OK).json({

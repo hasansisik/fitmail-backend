@@ -132,12 +132,26 @@ const register = async (req, res, next) => {
         console.warn('Failed to create Mailgun route:', routeResult.error);
       }
 
-      // 3. Hoşgeldin maili gönder
+      // 3. Hoşgeldin maili gönder (hem email'e hem recoveryEmail'e)
       const welcomeEmailResult = await mailgunService.sendWelcomeEmail(email, name);
       if (welcomeEmailResult.success) {
         console.log('Welcome email sent to:', email);
+        console.log('Welcome email message ID:', welcomeEmailResult.messageId);
+        console.log('Welcome email message:', welcomeEmailResult.message);
       } else {
-        console.warn('Failed to send welcome email:', welcomeEmailResult.error);
+        console.error('Failed to send welcome email to:', email);
+        console.error('Welcome email error:', welcomeEmailResult.error);
+        console.error('Welcome email error details:', JSON.stringify(welcomeEmailResult, null, 2));
+      }
+      
+      // Hoşgeldin mailini recoveryEmail'e de gönder (garanti için)
+      if (recoveryEmail && recoveryEmail !== email) {
+        const recoveryWelcomeResult = await mailgunService.sendWelcomeEmail(recoveryEmail, name);
+        if (recoveryWelcomeResult.success) {
+          console.log('Welcome email also sent to recovery email:', recoveryEmail);
+        } else {
+          console.warn('Failed to send welcome email to recovery email:', recoveryEmail, recoveryWelcomeResult.error);
+        }
       }
     } catch (mailgunError) {
       // Mailgun hatalarını logla ama kayıt işlemini engelleme
@@ -257,23 +271,24 @@ const login = async (req, res, next) => {
       process.env.REFRESH_TOKEN_SECRET
     );
 
-    const cookieDomain = process.env.COOKIE_DOMAIN || '.gozdedijital.xyz';
-    res.cookie("accessToken", accessToken, {
+    // Cookie domain setup - localhost için domain ve secure ayarları
+    const cookieDomain = process.env.COOKIE_DOMAIN || undefined;
+    const isLocalhost = !cookieDomain || cookieDomain.includes('localhost');
+    const cookieOptions = {
       httpOnly: true,
-      secure: true,
-      sameSite: 'None',
-      domain: cookieDomain,
-      path: '/',
-      maxAge: 365 * 24 * 60 * 60 * 1000,
-    });
-    res.cookie("refreshToken", refreshToken, {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'None',
-      domain: cookieDomain,
+      secure: !isLocalhost, // Localhost'ta secure false olmalı (HTTPS yok)
+      sameSite: isLocalhost ? 'Lax' : 'None', // Localhost'ta None çalışmayabilir
       path: '/',
       maxAge: 365 * 24 * 60 * 60 * 1000, //365 days (1 year)
-    });
+    };
+    
+    // Domain sadece production'da set et (localhost'ta undefined)
+    if (cookieDomain && !isLocalhost) {
+      cookieOptions.domain = cookieDomain;
+    }
+    
+    res.cookie("accessToken", accessToken, cookieOptions);
+    res.cookie("refreshToken", refreshToken, cookieOptions);
 
     const token = new Token({
       refreshToken,
@@ -434,9 +449,23 @@ const logout = async (req, res, next) => {
   try {
     await Token.findOneAndDelete({ user: req.user.userId });
 
-    const cookieDomain = process.env.COOKIE_DOMAIN || '.gozdedijital.xyz';
-    res.clearCookie("accessToken", { domain: cookieDomain, path: '/', secure: true, sameSite: 'None', httpOnly: true });
-    res.clearCookie("refreshToken", { domain: cookieDomain, path: '/', secure: true, sameSite: 'None', httpOnly: true });
+    // Cookie domain setup - localhost için domain ve secure ayarları
+    const cookieDomain = process.env.COOKIE_DOMAIN || undefined;
+    const isLocalhost = !cookieDomain || cookieDomain.includes('localhost');
+    const cookieOptions = {
+      httpOnly: true,
+      secure: !isLocalhost, // Localhost'ta secure false olmalı (HTTPS yok)
+      sameSite: isLocalhost ? 'Lax' : 'None', // Localhost'ta None çalışmayabilir
+      path: '/',
+    };
+    
+    // Domain sadece production'da set et (localhost'ta undefined)
+    if (cookieDomain && !isLocalhost) {
+      cookieOptions.domain = cookieDomain;
+    }
+
+    res.clearCookie("accessToken", cookieOptions);
+    res.clearCookie("refreshToken", cookieOptions);
 
     res.json({
       message: "logged out !",
@@ -1106,7 +1135,7 @@ const googleAuth = async (req, res, next) => {
       profile.user = user._id;
       await Promise.all([auth.save(), profile.save()]);
 
-      // Mailgun'da mailbox ve route oluştur (Google kullanıcıları için)
+      // Mailgun'da mailbox ve route oluştur, hoşgeldin maili gönder (Google kullanıcıları için)
       try {
         // 1. Önce mailbox oluştur (mail adresini aktif et)
         const mailboxResult = await mailgunService.createMailbox(email);
@@ -1122,6 +1151,14 @@ const googleAuth = async (req, res, next) => {
           console.log('Mailgun route created for Google user:', email);
         } else {
           console.warn('Failed to create Mailgun route for Google user:', routeResult.error);
+        }
+
+        // 3. Hoşgeldin maili gönder
+        const welcomeEmailResult = await mailgunService.sendWelcomeEmail(email, name);
+        if (welcomeEmailResult.success) {
+          console.log('Welcome email sent to Google user:', email);
+        } else {
+          console.warn('Failed to send welcome email to Google user:', welcomeEmailResult.error);
         }
       } catch (mailgunError) {
         // Mailgun hatalarını logla ama kayıt işlemini engelleme
@@ -1153,23 +1190,24 @@ const googleAuth = async (req, res, next) => {
       process.env.REFRESH_TOKEN_SECRET
     );
 
-    const cookieDomain = process.env.COOKIE_DOMAIN || '.gozdedijital.xyz';
-    res.cookie("accessToken", accessToken, {
+    // Cookie domain setup - localhost için domain ve secure ayarları
+    const cookieDomain = process.env.COOKIE_DOMAIN || undefined;
+    const isLocalhost = !cookieDomain || cookieDomain.includes('localhost');
+    const cookieOptions = {
       httpOnly: true,
-      secure: true,
-      sameSite: 'None',
-      domain: cookieDomain,
-      path: '/',
-      maxAge: 365 * 24 * 60 * 60 * 1000,
-    });
-    res.cookie("refreshToken", refreshToken, {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'None',
-      domain: cookieDomain,
+      secure: !isLocalhost, // Localhost'ta secure false olmalı (HTTPS yok)
+      sameSite: isLocalhost ? 'Lax' : 'None', // Localhost'ta None çalışmayabilir
       path: '/',
       maxAge: 365 * 24 * 60 * 60 * 1000, //365 days (1 year)
-    });
+    };
+    
+    // Domain sadece production'da set et (localhost'ta undefined)
+    if (cookieDomain && !isLocalhost) {
+      cookieOptions.domain = cookieDomain;
+    }
+    
+    res.cookie("accessToken", accessToken, cookieOptions);
+    res.cookie("refreshToken", refreshToken, cookieOptions);
 
     const token = new Token({
       refreshToken,
@@ -1242,23 +1280,24 @@ const googleLogin = async (req, res, next) => {
       process.env.REFRESH_TOKEN_SECRET
     );
 
-    const cookieDomain = process.env.COOKIE_DOMAIN || '.gozdedijital.xyz';
-    res.cookie("accessToken", accessToken, {
+    // Cookie domain setup - localhost için domain ve secure ayarları
+    const cookieDomain = process.env.COOKIE_DOMAIN || undefined;
+    const isLocalhost = !cookieDomain || cookieDomain.includes('localhost');
+    const cookieOptions = {
       httpOnly: true,
-      secure: true,
-      sameSite: 'None',
-      domain: cookieDomain,
-      path: '/',
-      maxAge: 365 * 24 * 60 * 60 * 1000,
-    });
-    res.cookie("refreshToken", refreshToken, {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'None',
-      domain: cookieDomain,
+      secure: !isLocalhost, // Localhost'ta secure false olmalı (HTTPS yok)
+      sameSite: isLocalhost ? 'Lax' : 'None', // Localhost'ta None çalışmayabilir
       path: '/',
       maxAge: 365 * 24 * 60 * 60 * 1000, //365 days (1 year)
-    });
+    };
+    
+    // Domain sadece production'da set et (localhost'ta undefined)
+    if (cookieDomain && !isLocalhost) {
+      cookieOptions.domain = cookieDomain;
+    }
+    
+    res.cookie("accessToken", accessToken, cookieOptions);
+    res.cookie("refreshToken", refreshToken, cookieOptions);
 
     const token = new Token({
       refreshToken,
@@ -1340,7 +1379,7 @@ const googleRegister = async (req, res, next) => {
     profile.user = user._id;
     await Promise.all([auth.save(), profile.save()]);
 
-    // Mailgun'da mailbox ve route oluştur (Google Register için)
+    // Mailgun'da mailbox ve route oluştur, hoşgeldin maili gönder (Google Register için)
     try {
       // 1. Önce mailbox oluştur (mail adresini aktif et)
       const mailboxResult = await mailgunService.createMailbox(email);
@@ -1356,6 +1395,14 @@ const googleRegister = async (req, res, next) => {
         console.log('Mailgun route created for Google register:', email);
       } else {
         console.warn('Failed to create Mailgun route for Google register:', routeResult.error);
+      }
+
+      // 3. Hoşgeldin maili gönder
+      const welcomeEmailResult = await mailgunService.sendWelcomeEmail(email, name);
+      if (welcomeEmailResult.success) {
+        console.log('Welcome email sent to Google register:', email);
+      } else {
+        console.warn('Failed to send welcome email to Google register:', welcomeEmailResult.error);
       }
     } catch (mailgunError) {
       // Mailgun hatalarını logla ama kayıt işlemini engelleme
@@ -1373,23 +1420,24 @@ const googleRegister = async (req, res, next) => {
       process.env.REFRESH_TOKEN_SECRET
     );
 
-    const cookieDomain = process.env.COOKIE_DOMAIN || '.gozdedijital.xyz';
-    res.cookie("accessToken", accessToken, {
+    // Cookie domain setup - localhost için domain ve secure ayarları
+    const cookieDomain = process.env.COOKIE_DOMAIN || undefined;
+    const isLocalhost = !cookieDomain || cookieDomain.includes('localhost');
+    const cookieOptions = {
       httpOnly: true,
-      secure: true,
-      sameSite: 'None',
-      domain: cookieDomain,
-      path: '/',
-      maxAge: 365 * 24 * 60 * 60 * 1000,
-    });
-    res.cookie("refreshToken", refreshToken, {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'None',
-      domain: cookieDomain,
+      secure: !isLocalhost, // Localhost'ta secure false olmalı (HTTPS yok)
+      sameSite: isLocalhost ? 'Lax' : 'None', // Localhost'ta None çalışmayabilir
       path: '/',
       maxAge: 365 * 24 * 60 * 60 * 1000, //365 days (1 year)
-    });
+    };
+    
+    // Domain sadece production'da set et (localhost'ta undefined)
+    if (cookieDomain && !isLocalhost) {
+      cookieOptions.domain = cookieDomain;
+    }
+    
+    res.cookie("accessToken", accessToken, cookieOptions);
+    res.cookie("refreshToken", refreshToken, cookieOptions);
 
     res.json({
       message: "Google ile kayıt başarılı.",
@@ -1800,23 +1848,24 @@ const verify2FALogin = async (req, res, next) => {
       process.env.REFRESH_TOKEN_SECRET
     );
 
-    const cookieDomain = process.env.COOKIE_DOMAIN || '.gozdedijital.xyz';
-    res.cookie("accessToken", accessToken, {
+    // Cookie domain setup - localhost için domain ve secure ayarları
+    const cookieDomain = process.env.COOKIE_DOMAIN || undefined;
+    const isLocalhost = !cookieDomain || cookieDomain.includes('localhost');
+    const cookieOptions = {
       httpOnly: true,
-      secure: true,
-      sameSite: 'None',
-      domain: cookieDomain,
-      path: '/',
-      maxAge: 365 * 24 * 60 * 60 * 1000,
-    });
-    res.cookie("refreshToken", refreshToken, {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'None',
-      domain: cookieDomain,
+      secure: !isLocalhost, // Localhost'ta secure false olmalı (HTTPS yok)
+      sameSite: isLocalhost ? 'Lax' : 'None', // Localhost'ta None çalışmayabilir
       path: '/',
       maxAge: 365 * 24 * 60 * 60 * 1000, //365 days (1 year)
-    });
+    };
+    
+    // Domain sadece production'da set et (localhost'ta undefined)
+    if (cookieDomain && !isLocalhost) {
+      cookieOptions.domain = cookieDomain;
+    }
+    
+    res.cookie("accessToken", accessToken, cookieOptions);
+    res.cookie("refreshToken", refreshToken, cookieOptions);
 
     const tokenDoc = new Token({
       refreshToken,
@@ -1905,23 +1954,24 @@ const switchActive = async (req, res, next) => {
       process.env.REFRESH_TOKEN_SECRET
     );
 
-    const cookieDomain = process.env.COOKIE_DOMAIN || '.gozdedijital.xyz';
-    res.cookie('accessToken', accessToken, {
+    // Cookie domain setup - localhost için domain ve secure ayarları
+    const cookieDomain = process.env.COOKIE_DOMAIN || undefined;
+    const isLocalhost = !cookieDomain || cookieDomain.includes('localhost');
+    const cookieOptions = {
       httpOnly: true,
-      secure: true,
-      sameSite: 'None',
-      domain: cookieDomain,
+      secure: !isLocalhost, // Localhost'ta secure false olmalı (HTTPS yok)
+      sameSite: isLocalhost ? 'Lax' : 'None', // Localhost'ta None çalışmayabilir
       path: '/',
-      maxAge: 365 * 24 * 60 * 60 * 1000,
-    });
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'None',
-      domain: cookieDomain,
-      path: '/',
-      maxAge: 365 * 24 * 60 * 60 * 1000,
-    });
+      maxAge: 365 * 24 * 60 * 60 * 1000, //365 days (1 year)
+    };
+    
+    // Domain sadece production'da set et (localhost'ta undefined)
+    if (cookieDomain && !isLocalhost) {
+      cookieOptions.domain = cookieDomain;
+    }
+    
+    res.cookie('accessToken', accessToken, cookieOptions);
+    res.cookie('refreshToken', refreshToken, cookieOptions);
 
     // Persist server-side token record
     existingToken.accessToken = accessToken;

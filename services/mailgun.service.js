@@ -1,5 +1,6 @@
 const formData = require('form-data');
 const Mailgun = require('mailgun.js');
+const axios = require('axios');
 
 class MailgunService {
   constructor() {
@@ -32,32 +33,123 @@ class MailgunService {
     }
   }
 
-  // Mailgun'da yeni mail adresi oluştur (basitleştirilmiş)
+  // Mailgun'da route oluştur - gelen mailleri webhook'a yönlendir
   async createMailRoute(email) {
     try {
-      if (!this.mg || !this.domain) {
+      if (!this.mg || !this.domain || !process.env.MAILGUN_API_KEY) {
         return {
           success: false,
           error: 'Mailgun is not properly configured. Please check your environment variables.'
         };
       }
 
-      // Mailgun'da mailbox ve route oluşturma işlemleri kaldırıldı
-      // Sadece mail gönderme işlemi kullanılıyor
-      // Gelen mailler webhook ile yakalanıyor
+      // Webhook URL'ini belirle - önce WEBHOOK_URL, sonra VERCEL_URL veya production URL
+      let webhookUrl = process.env.WEBHOOK_URL;
+      if (!webhookUrl && process.env.VERCEL_URL) {
+        // Vercel otomatik olarak VERCEL_URL environment variable'ını set eder
+        webhookUrl = `https://${process.env.VERCEL_URL}/v1/mail/webhook`;
+      }
+      if (!webhookUrl && process.env.BACKEND_URL) {
+        webhookUrl = `${process.env.BACKEND_URL}/v1/mail/webhook`;
+      }
+      // Production fallback - hardcode etmek yerine environment variable kullan
+      if (!webhookUrl) {
+        // Production URL'ini environment variable'dan al, yoksa default kullan
+        const prodUrl = process.env.PRODUCTION_URL || 'mail-backend-mu.vercel.app';
+        webhookUrl = `https://${prodUrl}/v1/mail/webhook`;
+      }
       
-      console.log('Mail route setup skipped - using webhook for incoming emails');
+      console.log('Creating Mailgun route for:', email);
+      console.log('Webhook URL:', webhookUrl);
+
+      // Mevcut route'ları kontrol et
+      try {
+        const routesResponse = await axios.get(`https://api.mailgun.net/v3/routes`, {
+          auth: {
+            username: 'api',
+            password: process.env.MAILGUN_API_KEY
+          }
+        });
+
+        // Zaten var olan bir route varsa, onu kullan
+        const existingRoute = routesResponse.data.items.find(route => 
+          route.expression && route.expression.includes('gozdedijital.xyz')
+        );
+
+        if (existingRoute) {
+          console.log('Existing Mailgun route found:', existingRoute.id);
+          console.log('Route actions:', existingRoute.actions);
+          
+          // Route'un webhook URL'ini kontrol et
+          const hasWebhook = existingRoute.actions.some(action => 
+            action.includes('forward') && action.includes(webhookUrl)
+          );
+
+          if (hasWebhook) {
+            console.log('Route already configured with correct webhook URL');
+            return {
+              success: true,
+              email: email,
+              routeId: existingRoute.id,
+              route: existingRoute,
+              message: 'Route already exists with correct webhook configuration'
+            };
+          } else {
+            console.log('Route exists but webhook URL is outdated, deleting and recreating...');
+            // Eski route'u sil
+            try {
+              await axios.delete(`https://api.mailgun.net/v3/routes/${existingRoute.id}`, {
+                auth: {
+                  username: 'api',
+                  password: process.env.MAILGUN_API_KEY
+                }
+              });
+              console.log('Old route deleted, creating new one...');
+            } catch (deleteError) {
+              console.warn('Could not delete old route:', deleteError.message);
+            }
+          }
+        }
+      } catch (routeCheckError) {
+        console.warn('Could not check existing routes:', routeCheckError.message);
+      }
+
+      // Yeni route oluştur
+      const routeFormData = new URLSearchParams();
+      routeFormData.append('priority', '0');
+      routeFormData.append('description', `Route for all @${this.domain} addresses`);
+      routeFormData.append('expression', `match_recipient(".*@${this.domain}")`);
+      routeFormData.append('action', `forward("${webhookUrl}")`);
+      routeFormData.append('action', 'store()');
+
+      console.log('Creating new Mailgun route...');
+      const createResponse = await axios.post(`https://api.mailgun.net/v3/routes`, routeFormData, {
+        auth: {
+          username: 'api',
+          password: process.env.MAILGUN_API_KEY
+        },
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        }
+      });
+
+      console.log('✅ Mailgun route created successfully!');
+      console.log('Route ID:', createResponse.data.route.id);
+      console.log('Route actions:', createResponse.data.route.actions);
       
       return {
         success: true,
         email: email,
-        message: 'Mail route setup completed - webhook will handle incoming emails'
+        routeId: createResponse.data.route.id,
+        route: createResponse.data.route,
+        message: 'Route created successfully'
       };
     } catch (error) {
       console.error('Mailgun create route error:', error);
+      console.error('Error details:', error.response?.data || error.message);
       return {
         success: false,
-        error: error.message
+        error: error.response?.data?.message || error.message
       };
     }
   }
@@ -75,6 +167,7 @@ class MailgunService {
       const messageData = {
         from: `${this.fromName} <${this.fromEmail}>`,
         to: email,
+        'o:skip-route': 'true', // Mailgun route'unu atla - mail doğrudan kullanıcının inbox'ına gitsin
         subject: 'Fitmail\'e Hoş Geldiniz! 🎉',
         html: `
           <!DOCTYPE html>
@@ -123,16 +216,23 @@ class MailgunService {
 
       const response = await this.mg.messages.create(this.domain, messageData);
       
+      console.log('Mailgun welcome email response:', JSON.stringify(response, null, 2));
+      console.log('Mailgun welcome email message ID:', response.id);
+      console.log('Mailgun welcome email message:', response.message);
+      
       return {
         success: true,
         messageId: response.id,
+        message: response.message,
         response: response
       };
     } catch (error) {
       console.error('Mailgun send welcome email error:', error);
+      console.error('Mailgun send welcome email error details:', JSON.stringify(error, null, 2));
       return {
         success: false,
-        error: error.message
+        error: error.message,
+        errorDetails: error
       };
     }
   }

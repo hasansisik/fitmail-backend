@@ -51,6 +51,25 @@ const upload = multer({
 const router = express.Router();
 
 // Mailgun webhook - gelen mailleri almak için (authentication yok!)
+// GET endpoint for testing - webhook'un çalışıp çalışmadığını kontrol etmek için
+router.get('/webhook', (req, res) => {
+  console.log('Webhook GET test request received');
+  res.status(200).json({ 
+    message: 'Webhook endpoint is working',
+    method: 'GET',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// OPTIONS için CORS preflight desteği
+router.options('/webhook', (req, res) => {
+  console.log('Webhook OPTIONS preflight request received');
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  res.status(200).end();
+});
+
 // multipart/form-data ve application/x-www-form-urlencoded formatlarını destekle
 router.post('/webhook', upload.any(), handleMailgunWebhook);
 
