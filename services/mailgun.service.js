@@ -55,7 +55,7 @@ class MailgunService {
       // Production fallback - hardcode etmek yerine environment variable kullan
       if (!webhookUrl) {
         // Production URL'ini environment variable'dan al, yoksa default kullan
-        const prodUrl = process.env.PRODUCTION_URL || 'mail-backend-mu.vercel.app';
+        const prodUrl = process.env.PRODUCTION_URL || 'api.gozdedijital.xyz';
         webhookUrl = `https://${prodUrl}/v1/mail/webhook`;
       }
       
