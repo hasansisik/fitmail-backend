@@ -1173,13 +1173,11 @@ const testWebhook = async (req, res, next) => {
 // Mailgun webhook handler - gelen mailleri almak için
 const handleMailgunWebhook = async (req, res, next) => {
   try {
-    // Hemen 200 döndür - Mailgun'un tekrar denemesini engelle
-    res.status(StatusCodes.OK);
-    
     console.log('=== MAILGUN WEBHOOK RECEIVED ===');
     console.log('📥 Method:', req.method);
     console.log('📥 URL:', req.url);
     console.log('📥 Path:', req.path);
+    console.log('📥 Original URL:', req.originalUrl);
     console.log('📥 Headers:', JSON.stringify(req.headers, null, 2));
     console.log('📦 Body:', JSON.stringify(req.body, null, 2));
     console.log('📎 Files:', req.files ? req.files.map(f => ({ fieldname: f.fieldname, originalname: f.originalname, mimetype: f.mimetype, size: f.size })) : 'No files');
@@ -1188,8 +1186,11 @@ const handleMailgunWebhook = async (req, res, next) => {
     // Eğer body boşsa ve multipart/form-data değilse, bu bir test isteği olabilir
     if (!req.body || Object.keys(req.body).length === 0) {
       console.log('⚠️ Empty webhook body - might be a test request');
-      return res.json({ message: 'Webhook endpoint is working', status: 'ok' });
+      return res.status(StatusCodes.OK).json({ message: 'Webhook endpoint is working', status: 'ok' });
     }
+    
+    // Hemen 200 döndür - Mailgun'un tekrar denemesini engelle ve timeout'u önle
+    res.status(StatusCodes.OK).json({ message: 'Webhook received', status: 'processing' });
     
     // Gmail kontrolü - tüm olası sender alanlarını kontrol et
     const sender = req.body?.sender || req.body?.from || req.body?.['Return-Path'] || req.body?.['X-Sender'] || '';
@@ -1345,15 +1346,21 @@ const handleMailgunWebhook = async (req, res, next) => {
       webhookData['_multerProcessed'] = true;
     }
 
-    // Normal webhook işleme - res zaten 200 olarak ayarlandı
-    // processWebhookData fonksiyonuna res gönder, o response'u gönderecek
-    await processWebhookData(webhookData, res);
+    // Normal webhook işleme - async olarak işle, response zaten gönderildi
+    // Mailgun timeout'u önlemek için response'u hemen gönderdik
+    processWebhookData(webhookData, res).catch(err => {
+      console.error('Error processing webhook data (async):', err);
+      // Response zaten gönderildi, sadece logla
+    });
   } catch (error) {
     console.error('Webhook error:', error);
-    res.status(StatusCodes.OK).json({
-      message: 'Webhook received but processing failed',
-      error: error.message
-    });
+    // Eğer response henüz gönderilmediyse gönder
+    if (!res.headersSent) {
+      res.status(StatusCodes.OK).json({
+        message: 'Webhook received but processing failed',
+        error: error.message
+      });
+    }
   }
 };
 
@@ -1392,8 +1399,8 @@ const extractEmailAddress = (value) => {
   return trimmed;
 };
 
-// Webhook data işleme fonksiyonu
-const processWebhookData = async (webhookData, res) => {
+// Webhook data işleme fonksiyonu - response göndermeden işle
+const processWebhookData = async (webhookData, res = null) => {
   // Webhook data'yı sakla (hata durumunda kullanmak için)
   const originalWebhookData = webhookData;
   
@@ -1423,7 +1430,8 @@ const processWebhookData = async (webhookData, res) => {
         k.toLowerCase().includes('to') ||
         k.toLowerCase() === 'to'
       ));
-      return res.status(StatusCodes.OK).json({ message: 'Webhook received but no recipient' });
+      // Response zaten gönderildi, sadece logla
+      return;
     }
     
     console.log('✅ Recipient found:', recipient);
@@ -1541,10 +1549,9 @@ const processWebhookData = async (webhookData, res) => {
       const allUsers = await User.find({}).select('mailAddress name').limit(10);
       console.log('📋 Sample users in database:', allUsers.map(u => ({ id: u._id, mailAddress: u.mailAddress, name: u.name })));
       
-      return res.status(StatusCodes.OK).json({
-        message: 'User not found but webhook accepted',
-        recipient: recipient
-      });
+      // Response zaten gönderildi, sadece logla
+      console.log('⚠️ User not found but webhook accepted, recipient:', recipient);
+      return;
     }
 
     console.log('✅ Recipient user found:', {
@@ -2015,11 +2022,9 @@ const processWebhookData = async (webhookData, res) => {
     if (existingByMailgunId) {
       console.log('⚠️ Duplicate webhook delivery detected, skipping mail creation for Message-Id:', messageId);
       console.log('📋 Existing mail ID:', existingByMailgunId._id);
-      return res.status(StatusCodes.OK).json({
-        success: true,
-        message: 'Duplicate ignored',
-        mailgunId: messageId
-      });
+      // Response zaten gönderildi, sadece logla
+      console.log('⚠️ Duplicate webhook delivery ignored, mailgunId:', messageId);
+      return;
     } else {
       console.log('✅ No duplicate mailgunId found');
     }
@@ -2104,12 +2109,12 @@ const processWebhookData = async (webhookData, res) => {
       attachmentsCount: attachments.length
     });
     console.log('=== WEBHOOK PROCESSING COMPLETE ===');
-
-    res.status(StatusCodes.OK).json({
-      success: true,
-      message: 'Mail received and saved',
+    
+    // Response zaten gönderildi, sadece logla
+    console.log('✅ Mail processing completed successfully:', {
       mailId: mail._id,
-      recipient: recipient
+      recipient: recipient,
+      message: 'Mail received and saved'
     });
   } catch (error) {
     console.error('❌ Webhook processing error:', error);
@@ -2135,11 +2140,8 @@ const processWebhookData = async (webhookData, res) => {
       console.error('Error logging Gmail details:', logError);
     }
     
-    // Webhook hatalarında hata döndürme, Mailgun tekrar deneyebilir
-    res.status(StatusCodes.OK).json({
-      message: 'Webhook received but processing failed',
-      error: error.message
-    });
+    // Response zaten gönderildi, sadece logla
+    console.error('❌ Webhook processing failed but response already sent:', error.message);
   }
 };
 
