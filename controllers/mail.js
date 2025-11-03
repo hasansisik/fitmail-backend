@@ -980,12 +980,22 @@ const setupMailAddress = async (req, res, next) => {
 
     console.log(`Mail address setup completed for user ${userId}: ${email}`);
 
+    // Webhook URL'ini belirle
+    let webhookUrl = process.env.WEBHOOK_URL;
+    if (!webhookUrl && process.env.BACKEND_URL) {
+      webhookUrl = `${process.env.BACKEND_URL}/v1/mail/webhook`;
+    }
+    if (!webhookUrl) {
+      const prodUrl = process.env.PRODUCTION_URL || 'api.gozdedijital.xyz';
+      webhookUrl = `https://${prodUrl}/v1/mail/webhook`;
+    }
+
     res.status(StatusCodes.OK).json({
       success: true,
       message: "Mail adresi başarıyla ayarlandı ve Mailgun route oluşturuldu",
       mailAddress: email,
       route: routeResult.route,
-      webhookUrl: process.env.WEBHOOK_URL || 'http://localhost:5003/v1/mail/webhook'
+      webhookUrl: webhookUrl
     });
   } catch (error) {
     next(error);

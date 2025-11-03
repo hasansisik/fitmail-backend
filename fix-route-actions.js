@@ -4,7 +4,16 @@ const axios = require('axios');
 async function fixRouteActions() {
   try {
     const apiKey = process.env.MAILGUN_API_KEY;
-    const webhookUrl = process.env.WEBHOOK_URL || 'http://localhost:5003/v1/mail/webhook';
+    
+    // Webhook URL'ini belirle - önce WEBHOOK_URL, sonra BACKEND_URL, sonra production URL
+    let webhookUrl = process.env.WEBHOOK_URL;
+    if (!webhookUrl && process.env.BACKEND_URL) {
+      webhookUrl = `${process.env.BACKEND_URL}/v1/mail/webhook`;
+    }
+    if (!webhookUrl) {
+      const prodUrl = process.env.PRODUCTION_URL || 'api.gozdedijital.xyz';
+      webhookUrl = `https://${prodUrl}/v1/mail/webhook`;
+    }
     
     if (!apiKey) {
       console.error('MAILGUN_API_KEY environment variable is not set');
