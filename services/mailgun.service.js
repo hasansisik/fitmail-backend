@@ -19,8 +19,8 @@ class MailgunService {
         key: process.env.MAILGUN_API_KEY,
         url: process.env.MAILGUN_DOMAIN_URL || 'https://api.mailgun.net'
       });
-      this.domain = process.env.MAILGUN_DOMAIN || 'gozdedijital.xyz';
-      this.fromEmail = process.env.EMAIL_FROM || 'noreply@gozdedijital.xyz';
+      this.domain = process.env.MAILGUN_DOMAIN || 'fitmail.com';
+      this.fromEmail = process.env.EMAIL_FROM || 'noreply@fitmail.com';
       this.fromName = process.env.EMAIL_FROM_NAME || 'Fitmail';
       
       console.log('Mailgun client initialized successfully');
@@ -55,7 +55,7 @@ class MailgunService {
       // Production fallback - hardcode etmek yerine environment variable kullan
       if (!webhookUrl) {
         // Production URL'ini environment variable'dan al, yoksa default kullan
-        const prodUrl = process.env.PRODUCTION_URL || 'api.gozdedijital.xyz';
+        const prodUrl = process.env.PRODUCTION_URL || 'api.fitmail.com';
         webhookUrl = `https://${prodUrl}/v1/mail/webhook`;
       }
       
@@ -73,7 +73,7 @@ class MailgunService {
 
         // Zaten var olan bir route varsa, onu kullan
         const existingRoute = routesResponse.data.items.find(route => 
-          route.expression && route.expression.includes('gozdedijital.xyz')
+          route.expression && route.expression.includes('fitmail.com')
         );
 
         if (existingRoute) {
@@ -599,7 +599,7 @@ class MailgunService {
         type: 'dkim',
         priority: 'high',
         message: 'DKIM ayarları eksik. Mailgun dashboard\'dan DKIM\'i aktifleştirin.',
-        action: 'Mailgun dashboard > Domains > gozdedijital.xyz > DKIM > Enable'
+        action: 'Mailgun dashboard > Domains > fitmail.com > DKIM > Enable'
       });
     }
 

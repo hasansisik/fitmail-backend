@@ -45,9 +45,9 @@ const register = async (req, res, next) => {
       throw new CustomError.BadRequestError("Bu e-posta adresi zaten kayıtlı.");
     }
 
-    // Mail adresi kontrolü - email zaten @gozdedijital.xyz ile geliyor
+    // Mail adresi kontrolü - email zaten @fitmail.com ile geliyor
     if (email) {
-      const domain = 'gozdedijital.xyz';
+      const domain = 'fitmail.com';
       if (!email.endsWith(`@${domain}`)) {
         throw new CustomError.BadRequestError(`Mail adresi @${domain} ile bitmelidir`);
       }

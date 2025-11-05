@@ -315,7 +315,7 @@ const sendMail = async (req, res, next) => {
       // Optional internal delivery fallback for same-domain recipients
       if ((process.env.INTERNAL_DELIVERY_FALLBACK || '').toLowerCase() !== 'false') {
         console.log('[INTERNAL_FALLBACK] Enabled for normal send');
-        const domain = process.env.MAIL_DOMAIN || 'gozdedijital.xyz';
+        const domain = process.env.MAIL_DOMAIN || 'fitmail.com';
         for (const recipient of recipients) {
           if (recipient.endsWith(`@${domain}`)) {
             console.log(`[INTERNAL_FALLBACK] Creating inbox copy for ${recipient}`);
@@ -913,7 +913,7 @@ const checkMailAddress = async (req, res, next) => {
     }
 
     // Mail adresinin kullanıcının domain'i ile uyumlu olup olmadığını kontrol et
-    const domain = process.env.MAIL_DOMAIN || 'gozdedijital.xyz';
+    const domain = process.env.MAIL_DOMAIN || 'fitmail.com';
     if (!email.endsWith(`@${domain}`)) {
       throw new CustomError.BadRequestError(`Mail adresi @${domain} ile bitmelidir`);
     }
@@ -956,7 +956,7 @@ const setupMailAddress = async (req, res, next) => {
     }
 
     // Mail adresinin domain'ini kontrol et
-    const domain = process.env.MAIL_DOMAIN || 'gozdedijital.xyz';
+    const domain = process.env.MAIL_DOMAIN || 'fitmail.com';
     if (!email.endsWith(`@${domain}`)) {
       throw new CustomError.BadRequestError(`Mail adresi @${domain} ile bitmelidir`);
     }
@@ -986,7 +986,7 @@ const setupMailAddress = async (req, res, next) => {
       webhookUrl = `${process.env.BACKEND_URL}/v1/mail/webhook`;
     }
     if (!webhookUrl) {
-      const prodUrl = process.env.PRODUCTION_URL || 'api.gozdedijital.xyz';
+      const prodUrl = process.env.PRODUCTION_URL || 'api.fitmail.com';
       webhookUrl = `https://${prodUrl}/v1/mail/webhook`;
     }
 
@@ -1044,7 +1044,7 @@ const createMailbox = async (req, res, next) => {
     }
 
     // Domain kontrolü
-    const domain = process.env.MAIL_DOMAIN || 'gozdedijital.xyz';
+    const domain = process.env.MAIL_DOMAIN || 'fitmail.com';
     if (!email.endsWith(`@${domain}`)) {
       throw new CustomError.BadRequestError(`Mail adresi @${domain} ile bitmelidir`);
     }
@@ -1136,7 +1136,7 @@ const testWebhook = async (req, res, next) => {
       'body-plain': content || 'Test mail içeriği',
       'body-html': `<p>${content || 'Test mail içeriği'}</p>`,
       timestamp: Math.floor(Date.now() / 1000),
-      'Message-Id': `test-${Date.now()}@${process.env.MAILGUN_DOMAIN || 'gozdedijital.xyz'}`,
+      'Message-Id': `test-${Date.now()}@${process.env.MAILGUN_DOMAIN || 'fitmail.com'}`,
       'attachment-count': '2',
       'attachment-1': 'test-document.pdf',
       'attachment-1-url': 'https://example.com/test-document.pdf',
@@ -1934,7 +1934,7 @@ const processWebhookData = async (webhookData, res = null) => {
     const autoCategories = [];
 
     // Tüm mail sağlayıcılarından gelen mail için otomatik etiketleme
-    if (sender.includes('@gmail.com') || sender.includes('@gozdedijital.xyz') || sender.includes('@outlook.com') || sender.includes('@hotmail.com') || sender.includes('@yahoo.com')) {
+    if (sender.includes('@gmail.com') || sender.includes('@fitmail.com') || sender.includes('@outlook.com') || sender.includes('@hotmail.com') || sender.includes('@yahoo.com')) {
       console.log('Gmail mail detected, applying auto-labeling...');
 
       // Sosyal medya etiketleri
@@ -2610,7 +2610,7 @@ const processScheduledMails = async () => {
       // Optional internal delivery fallback for scheduled mails to same-domain recipients
       if ((process.env.INTERNAL_DELIVERY_FALLBACK || '').toLowerCase() !== 'false') {
         console.log('[INTERNAL_FALLBACK] Enabled for scheduled send');
-        const domain = process.env.MAIL_DOMAIN || 'gozdedijital.xyz';
+        const domain = process.env.MAIL_DOMAIN || 'fitmail.com';
         for (const recipient of mail.to) {
           if (recipient.email.endsWith(`@${domain}`)) {
             console.log(`[INTERNAL_FALLBACK] Creating inbox copy for scheduled recipient ${recipient.email}`);
@@ -2810,7 +2810,7 @@ const addReplyToMail = async (req, res, next) => {
       console.log("Reply mail added to user's mail list. User ID:", userId);
 
       // Optional internal delivery fallback for replies to same-domain recipients
-      const domain = process.env.MAIL_DOMAIN || 'gozdedijital.xyz';
+      const domain = process.env.MAIL_DOMAIN || 'fitmail.com';
       const recipientEmail = extractEmailAddress(originalMail.from.email);
       // Reply fallback is disabled by default to avoid duplicate deliveries; enable with INTERNAL_REPLY_FALLBACK=true
       if ((process.env.INTERNAL_REPLY_FALLBACK || '').toLowerCase() === 'true' && recipientEmail.endsWith(`@${domain}`)) {

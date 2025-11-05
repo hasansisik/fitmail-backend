@@ -40,10 +40,10 @@ app.use(cors({
             'https://fitmail-nextjs.vercel.app',
             'https://gozdedijital.vercel.app',
             'https://gozdedijital-nextjs.vercel.app',
-            'https://gozdedijital.xyz',
-            'https://www.gozdedijital.xyz',
-            'https://account.gozdedijital.xyz',
-            'https://panel.gozdedijital.xyz',
+            'https://fitmail.com',
+            'https://www.fitmail.com',
+            'https://account.fitmail.com',
+            'https://panel.fitmail.com',
         ];
         
         if (allowedOrigins.indexOf(origin) !== -1) {
@@ -81,10 +81,10 @@ app.options('*', cors({
             'https://fitmail-nextjs.vercel.app',
             'https://gozdedijital.vercel.app',
             'https://gozdedijital-nextjs.vercel.app',
-            'https://gozdedijital.xyz',
-            'https://www.gozdedijital.xyz',
-            'https://account.gozdedijital.xyz',
-            'https://panel.gozdedijital.xyz',
+            'https://fitmail.com',
+            'https://www.fitmail.com',
+            'https://account.fitmail.com',
+            'https://panel.fitmail.com',
         ];
         
         if (allowedOrigins.indexOf(origin) !== -1) {

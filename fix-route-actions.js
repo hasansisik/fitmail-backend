@@ -11,7 +11,7 @@ async function fixRouteActions() {
       webhookUrl = `${process.env.BACKEND_URL}/v1/mail/webhook`;
     }
     if (!webhookUrl) {
-      const prodUrl = process.env.PRODUCTION_URL || 'api.gozdedijital.xyz';
+      const prodUrl = process.env.PRODUCTION_URL || 'api.fitmail.com';
       webhookUrl = `https://${prodUrl}/v1/mail/webhook`;
     }
     
@@ -32,7 +32,7 @@ async function fixRouteActions() {
     });
 
     const gozdeRoute = routesResponse.data.items.find(route => 
-      route.expression && route.expression.includes('gozdedijital.xyz')
+      route.expression && route.expression.includes('fitmail.com')
     );
 
     if (gozdeRoute) {
@@ -48,8 +48,8 @@ async function fixRouteActions() {
     // Yeni route oluştur - form data olarak
     const formData = new URLSearchParams();
     formData.append('priority', '0');
-    formData.append('description', 'General route for all @gozdedijital.xyz addresses');
-    formData.append('expression', 'match_recipient(".*@gozdedijital.xyz")');
+    formData.append('description', 'General route for all @fitmail.com addresses');
+    formData.append('expression', 'match_recipient(".*@fitmail.com")');
     formData.append('action', `forward("${webhookUrl}")`);
     formData.append('action', 'store()');
 
