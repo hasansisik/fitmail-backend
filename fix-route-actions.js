@@ -24,7 +24,7 @@ async function fixRouteActions() {
     console.log('Webhook URL:', webhookUrl);
 
     // Mevcut route'u sil
-    const routesResponse = await axios.get(`https://api.mailgun.net/v3/routes`, {
+    const routesResponse = await axios.get(`https://api.eu.mailgun.net/v3/routes`, {
       auth: {
         username: 'api',
         password: apiKey
@@ -37,7 +37,7 @@ async function fixRouteActions() {
 
     if (gozdeRoute) {
       console.log('Deleting existing route:', gozdeRoute.id);
-      await axios.delete(`https://api.mailgun.net/v3/routes/${gozdeRoute.id}`, {
+      await axios.delete(`https://api.eu.mailgun.net/v3/routes/${gozdeRoute.id}`, {
         auth: {
           username: 'api',
           password: apiKey
@@ -54,7 +54,7 @@ async function fixRouteActions() {
     formData.append('action', 'store()');
 
     console.log('Creating new route with form data...');
-    const createResponse = await axios.post(`https://api.mailgun.net/v3/routes`, formData, {
+    const createResponse = await axios.post(`https://api.eu.mailgun.net/v3/routes`, formData, {
       auth: {
         username: 'api',
         password: apiKey
