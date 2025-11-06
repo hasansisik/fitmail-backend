@@ -132,7 +132,7 @@ const register = async (req, res, next) => {
         console.warn('Failed to create Mailgun route:', routeResult.error);
       }
 
-      // 3. Hoşgeldin maili gönder (hem email'e hem recoveryEmail'e)
+      // 3. Hoşgeldin maili gönder (sadece email'e - oluşturulan domaine)
       const welcomeEmailResult = await mailgunService.sendWelcomeEmail(email, name);
       if (welcomeEmailResult.success) {
         console.log('Welcome email sent to:', email);
@@ -142,16 +142,6 @@ const register = async (req, res, next) => {
         console.error('Failed to send welcome email to:', email);
         console.error('Welcome email error:', welcomeEmailResult.error);
         console.error('Welcome email error details:', JSON.stringify(welcomeEmailResult, null, 2));
-      }
-      
-      // Hoşgeldin mailini recoveryEmail'e de gönder (garanti için)
-      if (recoveryEmail && recoveryEmail !== email) {
-        const recoveryWelcomeResult = await mailgunService.sendWelcomeEmail(recoveryEmail, name);
-        if (recoveryWelcomeResult.success) {
-          console.log('Welcome email also sent to recovery email:', recoveryEmail);
-        } else {
-          console.warn('Failed to send welcome email to recovery email:', recoveryEmail, recoveryWelcomeResult.error);
-        }
       }
     } catch (mailgunError) {
       // Mailgun hatalarını logla ama kayıt işlemini engelleme
