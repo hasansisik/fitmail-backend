@@ -1,4 +1,5 @@
 const { User, Auth, Profile, Address } = require("../models/User");
+const Mail = require("../models/Mail");
 const Token = require("../models/Token");
 const { StatusCodes } = require("http-status-codes");
 const CustomError = require("../errors");
@@ -19,6 +20,92 @@ function getLogoByGender(gender) {
     return "https://res.cloudinary.com/da2qwsrbv/image/upload/v1762039722/noavatarkadin_goancm.png";
   }
   return "https://res.cloudinary.com/da2qwsrbv/image/upload/v1762039720/noavatardiger_ni9dqg.jpg";
+}
+
+// Helper: Add welcome email to inbox (internal delivery fallback)
+async function addWelcomeEmailToInbox(user, email, name, welcomeEmailResult) {
+  const domain = process.env.MAIL_DOMAIN || 'fitmail.com';
+  if (email.endsWith(`@${domain}`) && welcomeEmailResult.success && welcomeEmailResult.messageId) {
+    try {
+      console.log('[INTERNAL_FALLBACK] Creating inbox copy for welcome email to:', email);
+      // Duplicate kontrolü - webhook zaten oluşturmuş olabilir
+      const messageIdMatch = welcomeEmailResult.messageId.match(/<(.+)>/);
+      const mailgunId = messageIdMatch ? messageIdMatch[1] : welcomeEmailResult.messageId;
+      const existingMail = await Mail.findOne({ user: user._id, mailgunId: mailgunId });
+      if (existingMail) {
+        console.log('[INTERNAL_FALLBACK] Welcome email already exists in inbox via webhook, skipping');
+        return;
+      }
+      
+      // Hoşgeldin mailini inbox'a ekle
+      const welcomeMailData = {
+        from: { email: 'noreply@fitmail.com', name: 'Fitmail' },
+        to: [{ email: email, name: name }],
+        subject: 'Fitmail\'e Hoş Geldiniz! 🎉',
+        content: `Merhaba ${name}!\n\nFitmail ailesine katıldığınız için çok mutluyuz!\n\nMail adresiniz: ${email}\n\nArtık güvenli ve hızlı mail sisteminizi kullanmaya başlayabilirsiniz.`,
+        htmlContent: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <style>
+              body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+              .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+              .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+              .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }
+              .button { display: inline-block; padding: 12px 30px; background: #667eea; color: white; text-decoration: none; border-radius: 5px; margin: 20px 0; }
+              .footer { text-align: center; margin-top: 30px; color: #666; font-size: 12px; }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <div class="header">
+                <h1>🎉 Hoş Geldiniz!</h1>
+              </div>
+              <div class="content">
+                <h2>Merhaba ${name}!</h2>
+                <p>Fitmail ailesine katıldığınız için çok mutluyuz! 🚀</p>
+                <p>Mail adresiniz: <strong>${email}</strong></p>
+                <p>Artık güvenli ve hızlı mail sisteminizi kullanmaya başlayabilirsiniz.</p>
+                <div style="text-align: center;">
+                  <a href="${process.env.FRONTEND_URL || 'http://localhost:3000'}/mail" class="button">Mail Kutunuza Git</a>
+                </div>
+                <h3>Özellikler:</h3>
+                <ul>
+                  <li>✉️ Sınırsız mail gönderme ve alma</li>
+                  <li>🔒 Güvenli ve şifreli iletişim</li>
+                  <li>📱 Mobil uyumlu arayüz</li>
+                  <li>🚀 Hızlı ve güvenilir altyapı</li>
+                </ul>
+              </div>
+              <div class="footer">
+                <p>Bu mail noreply@fitmail.com adresinden gönderilmiştir.</p>
+                <p>&copy; 2025 Fitmail. Tüm hakları saklıdır.</p>
+              </div>
+            </div>
+          </body>
+          </html>
+        `,
+        folder: 'inbox',
+        status: 'delivered',
+        isRead: false,
+        labels: [],
+        categories: [],
+        attachments: [],
+        user: user._id,
+        messageId: `welcome-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        receivedAt: new Date(),
+        mailgunId: mailgunId
+      };
+      const welcomeMail = new Mail(welcomeMailData);
+      await welcomeMail.save();
+      user.mails.push(welcomeMail._id);
+      await user.save();
+      console.log('[INTERNAL_FALLBACK] Welcome email added to inbox:', welcomeMail._id);
+    } catch (fallbackError) {
+      console.error('[INTERNAL_FALLBACK] Error creating inbox copy for welcome email:', fallbackError);
+      // Fallback hatası mail gönderme işlemini etkilemesin
+    }
+  }
 }
 
 //Register
@@ -138,6 +225,10 @@ const register = async (req, res, next) => {
         console.log('Welcome email sent to:', email);
         console.log('Welcome email message ID:', welcomeEmailResult.messageId);
         console.log('Welcome email message:', welcomeEmailResult.message);
+        
+        // Internal delivery fallback: Kendi domain'imize mail gönderirken, maili doğrudan inbox'a ekle
+        // Mailgun API ile gönderilen mailler route'ları tetiklemeyebilir, bu yüzden manuel olarak ekliyoruz
+        await addWelcomeEmailToInbox(user, email, name, welcomeEmailResult);
       } else {
         console.error('Failed to send welcome email to:', email);
         console.error('Welcome email error:', welcomeEmailResult.error);
@@ -1147,6 +1238,8 @@ const googleAuth = async (req, res, next) => {
         const welcomeEmailResult = await mailgunService.sendWelcomeEmail(email, name);
         if (welcomeEmailResult.success) {
           console.log('Welcome email sent to Google user:', email);
+          // Internal delivery fallback: Kendi domain'imize mail gönderirken, maili doğrudan inbox'a ekle
+          await addWelcomeEmailToInbox(user, email, name, welcomeEmailResult);
         } else {
           console.warn('Failed to send welcome email to Google user:', welcomeEmailResult.error);
         }
@@ -1391,6 +1484,8 @@ const googleRegister = async (req, res, next) => {
       const welcomeEmailResult = await mailgunService.sendWelcomeEmail(email, name);
       if (welcomeEmailResult.success) {
         console.log('Welcome email sent to Google register:', email);
+        // Internal delivery fallback: Kendi domain'imize mail gönderirken, maili doğrudan inbox'a ekle
+        await addWelcomeEmailToInbox(user, email, name, welcomeEmailResult);
       } else {
         console.warn('Failed to send welcome email to Google register:', welcomeEmailResult.error);
       }
