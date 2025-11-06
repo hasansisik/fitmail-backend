@@ -119,8 +119,11 @@ class MailgunService {
       routeFormData.append('priority', '0');
       routeFormData.append('description', `Route for all @${this.domain} addresses`);
       routeFormData.append('expression', `match_recipient(".*@${this.domain}")`);
-      routeFormData.append('action', `forward("${webhookUrl}")`);
+      // Action sırası önemli: önce store() sonra forward()
+      // store() maili Mailgun'un storage'ında saklar
+      // forward() maili webhook'a gönderir
       routeFormData.append('action', 'store()');
+      routeFormData.append('action', `forward("${webhookUrl}")`);
 
       console.log('Creating new Mailgun route...');
       const createResponse = await axios.post(`https://api.mailgun.net/v3/routes`, routeFormData, {
@@ -164,10 +167,13 @@ class MailgunService {
         };
       }
 
+      // Kendi domain'imize mail gönderirken, mailin Mailgun'un storage'ında saklanması ve webhook'a gitmesi gerekiyor
+      // Route'da store() ve forward() action'ları var, bu yüzden route'un çalışmasına izin veriyoruz
       const messageData = {
         from: `${this.fromName} <${this.fromEmail}>`,
         to: email,
-        'o:skip-route': 'true', // Mailgun route'unu atla - mail doğrudan kullanıcının inbox'ına gitsin
+        // o:skip-route kaldırıldı - kendi domain'imize mail gönderirken route'un store() action'ını kullanması gerekiyor
+        // o:require-tls ve o:tracking parametreleri eklenmedi çünkü kendi domain'imize mail gönderirken bunlar gerekli değil
         subject: 'Fitmail\'e Hoş Geldiniz! 🎉',
         html: `
           <!DOCTYPE html>
