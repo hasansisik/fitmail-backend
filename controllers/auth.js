@@ -225,10 +225,7 @@ const register = async (req, res, next) => {
         console.log('Welcome email sent to:', email);
         console.log('Welcome email message ID:', welcomeEmailResult.messageId);
         console.log('Welcome email message:', welcomeEmailResult.message);
-        
-        // Internal delivery fallback: Kendi domain'imize mail gönderirken, maili doğrudan inbox'a ekle
-        // Mailgun API ile gönderilen mailler route'ları tetiklemeyebilir, bu yüzden manuel olarak ekliyoruz
-        await addWelcomeEmailToInbox(user, email, name, welcomeEmailResult);
+        // Mailgun route'u webhook ile maili otomatik olarak inbox'a ekleyecek, manuel eklemeye gerek yok
       } else {
         console.error('Failed to send welcome email to:', email);
         console.error('Welcome email error:', welcomeEmailResult.error);
@@ -1238,8 +1235,7 @@ const googleAuth = async (req, res, next) => {
         const welcomeEmailResult = await mailgunService.sendWelcomeEmail(email, name);
         if (welcomeEmailResult.success) {
           console.log('Welcome email sent to Google user:', email);
-          // Internal delivery fallback: Kendi domain'imize mail gönderirken, maili doğrudan inbox'a ekle
-          await addWelcomeEmailToInbox(user, email, name, welcomeEmailResult);
+          // Mailgun route'u webhook ile maili otomatik olarak inbox'a ekleyecek, manuel eklemeye gerek yok
         } else {
           console.warn('Failed to send welcome email to Google user:', welcomeEmailResult.error);
         }
@@ -1484,8 +1480,7 @@ const googleRegister = async (req, res, next) => {
       const welcomeEmailResult = await mailgunService.sendWelcomeEmail(email, name);
       if (welcomeEmailResult.success) {
         console.log('Welcome email sent to Google register:', email);
-        // Internal delivery fallback: Kendi domain'imize mail gönderirken, maili doğrudan inbox'a ekle
-        await addWelcomeEmailToInbox(user, email, name, welcomeEmailResult);
+        // Mailgun route'u webhook ile maili otomatik olarak inbox'a ekleyecek, manuel eklemeye gerek yok
       } else {
         console.warn('Failed to send welcome email to Google register:', welcomeEmailResult.error);
       }
