@@ -853,7 +853,8 @@ const getMailStats = async (req, res, next) => {
           sent: { $sum: { $cond: [{ $eq: ['$folder', 'sent'] }, 1, 0] } },
           drafts: { $sum: { $cond: [{ $and: [{ $eq: ['$folder', 'drafts'] }, { $eq: ['$isRead', false] }] }, 1, 0] } },
           spam: { $sum: { $cond: [{ $and: [{ $eq: ['$folder', 'spam'] }, { $eq: ['$isRead', false] }] }, 1, 0] } },
-          trash: { $sum: { $cond: [{ $and: [{ $eq: ['$folder', 'trash'] }, { $eq: ['$isRead', false] }] }, 1, 0] } },
+          // Trash klasörü için toplam sayı (okunmuş/okunmamış fark etmez - tüm mailleri say)
+          trash: { $sum: { $cond: [{ $eq: ['$folder', 'trash'] }, 1, 0] } },
           archive: { $sum: { $cond: [{ $and: [{ $eq: ['$folder', 'archive'] }, { $eq: ['$isRead', false] }] }, 1, 0] } },
           // Yıldızlı maillerin toplam sayısı (çöp kutusundakiler hariç)
           starred: { $sum: { $cond: [{ $and: [{ $eq: ['$isStarred', true] }, { $ne: ['$folder', 'trash'] }] }, 1, 0] } },
