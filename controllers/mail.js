@@ -5,6 +5,187 @@ const CustomError = require("../errors");
 const mailgunService = require("../services/mailgun.service");
 const { uploadFileToCloudinary } = require("../helpers/uploadToCloudinary");
 const mongoose = require("mongoose");
+const axios = require("axios");
+const FormData = require("form-data");
+
+// Gmail attachment URL'sini webhook verilerinden oluştur
+const generateGmailAttachmentUrlFromWebhook = async (webhookData, attachmentIndex, attachmentInfo) => {
+  try {
+    // Sadece Gmail'den gelen mailler için
+    const sender = webhookData['sender'] || webhookData['from'] || '';
+    if (!sender.includes('@gmail.com') && !sender.includes('@googlemail.com')) {
+      return null;
+    }
+
+    // Message-Id'yi al
+    const messageId = webhookData['Message-Id'] || webhookData['message-id'] || webhookData['Message-ID'] || webhookData['message_id'];
+    if (!messageId) {
+      console.warn('No Message-Id found for Gmail attachment URL generation');
+      return null;
+    }
+
+    // Mailgun storage URL'ini kontrol et - webhook'tan gelebilir
+    // Mailgun webhook formatı: storage-url veya storage.url veya storage[url]
+    let storageUrl = webhookData['storage-url'] ||
+      webhookData['storage.url'] ||
+      webhookData['storage']?.url?.[0] ||
+      webhookData['storage']?.url ||
+      null;
+
+    // Eğer storage URL string array ise, ilk elemanı al
+    if (Array.isArray(storageUrl)) {
+      storageUrl = storageUrl[0];
+    }
+
+    // Eğer storage URL varsa, Mailgun storage API'sinden mesajı al ve parse et
+    let realAttId = null;
+    let contentId = null;
+
+    if (storageUrl && process.env.MAILGUN_API_KEY) {
+      try {
+        console.log(`📦 Fetching message from Mailgun storage: ${storageUrl}`);
+
+        // Mailgun storage API'sinden mesajı al
+        const storageResponse = await axios.get(storageUrl, {
+          auth: {
+            username: 'api',
+            password: process.env.MAILGUN_API_KEY
+          },
+          headers: {
+            'Accept': 'message/rfc2822' // MIME formatında al
+          },
+          timeout: 10000 // 10 saniye timeout
+        });
+
+        // MIME mesajını parse et
+        const mimeMessage = typeof storageResponse.data === 'string'
+          ? storageResponse.data
+          : JSON.stringify(storageResponse.data);
+        console.log(`📦 Message fetched from storage, length: ${mimeMessage.length}`);
+
+        // Content-ID ve X-Attachment-Id'yi bul
+        // MIME formatında attachment'lar genellikle şu şekilde:
+        // Content-ID: <f_mhqw43rz0>
+        // X-Attachment-Id: f_mhqw43rz0
+
+        // Tüm Content-ID'leri bul
+        const allContentIds = [];
+        const contentIdRegex = /Content-ID:\s*<([^>]+)>/gi;
+        let contentIdMatch;
+        while ((contentIdMatch = contentIdRegex.exec(mimeMessage)) !== null) {
+          allContentIds.push(contentIdMatch[1]);
+        }
+        console.log(`📦 Found ${allContentIds.length} Content-ID(s):`, allContentIds);
+
+        // Tüm X-Attachment-Id'leri bul
+        const allXAttachmentIds = [];
+        const xAttachmentIdRegex = /X-Attachment-Id:\s*([^\r\n]+)/gi;
+        let xAttachmentIdMatch;
+        while ((xAttachmentIdMatch = xAttachmentIdRegex.exec(mimeMessage)) !== null) {
+          allXAttachmentIds.push(xAttachmentIdMatch[1].trim());
+        }
+        console.log(`📦 Found ${allXAttachmentIds.length} X-Attachment-Id(s):`, allXAttachmentIds);
+
+        // Attachment index'e göre Content-ID veya X-Attachment-Id'yi al
+        if (allContentIds.length >= attachmentIndex) {
+          contentId = allContentIds[attachmentIndex - 1];
+          realAttId = contentId;
+          console.log(`✅ Found Content-ID for attachment ${attachmentIndex}: ${contentId}`);
+        } else if (allXAttachmentIds.length >= attachmentIndex) {
+          realAttId = allXAttachmentIds[attachmentIndex - 1];
+          console.log(`✅ Found X-Attachment-Id for attachment ${attachmentIndex}: ${realAttId}`);
+        }
+
+        // Eğer hala realAttId yoksa, attachment'ın filename'inden oluştur
+        if (!realAttId && attachmentInfo && attachmentInfo.filename) {
+          // Gmail'in attachment ID formatı genellikle f_ ile başlar
+          // Filename'den hash oluştur
+          const filenameHash = attachmentInfo.filename.split('').reduce((acc, char) => {
+            return ((acc << 5) - acc) + char.charCodeAt(0);
+          }, 0);
+          realAttId = `f_${Math.abs(filenameHash).toString(36)}${Date.now().toString(36)}`;
+          console.log(`⚠️ Generated realAttId from filename: ${realAttId}`);
+        }
+      } catch (storageError) {
+        console.error('❌ Error fetching message from Mailgun storage:', storageError.message);
+        console.error('Storage URL:', storageUrl);
+        // Storage API hatası durumunda devam et
+      }
+    } else {
+      console.log('⚠️ No storage URL found in webhook data or MAILGUN_API_KEY not set');
+      console.log('Webhook data keys:', Object.keys(webhookData).filter(k => k.toLowerCase().includes('storage')));
+    }
+
+    // Eğer hala realAttId yoksa, webhook'tan gelen verileri kullan
+    if (!realAttId) {
+      // X-Attachment-Id'yi kontrol et
+      realAttId = webhookData[`X-Attachment-Id-${attachmentIndex}`] ||
+        webhookData[`x-attachment-id-${attachmentIndex}`] ||
+        webhookData[`Content-ID-${attachmentIndex}`]?.replace('<', '').replace('>', '') ||
+        webhookData[`content-id-${attachmentIndex}`]?.replace('<', '').replace('>', '');
+
+      // Content-ID map'ten çıkar
+      if (!realAttId) {
+        const contentIdMap = webhookData['content-id-map'];
+        if (contentIdMap) {
+          try {
+            const idMap = typeof contentIdMap === 'string' ? JSON.parse(contentIdMap) : contentIdMap;
+            const contentIds = Object.keys(idMap);
+            if (contentIds.length >= attachmentIndex) {
+              const contentIdKey = contentIds[attachmentIndex - 1];
+              realAttId = contentIdKey.replace('<', '').replace('>', '').trim();
+            }
+          } catch (e) {
+            console.log('Could not parse content-id-map:', e.message);
+          }
+        }
+      }
+    }
+
+    // Eğer hala realAttId yoksa, oluşturamayız
+    if (!realAttId) {
+      console.warn(`No realAttId found for attachment ${attachmentIndex}, using fallback`);
+      // Fallback: attachment index'inden oluştur
+      realAttId = `f_${attachmentIndex}_${Date.now().toString(36)}`;
+    }
+
+    // Thread-ID'yi al (varsa) - genellikle Message-Id ile aynı
+    const threadId = webhookData['X-Gmail-Thread-Id'] ||
+      webhookData['Thread-Id'] ||
+      webhookData['thread-id'] ||
+      messageId;
+
+    // IK token'ı al (varsa) - Gmail'in internal token'ı, genellikle sabit
+    const ikToken = webhookData['X-Gmail-Ik'] ||
+      webhookData['ik'] ||
+      '7ac7c89a8e';
+
+    // Attachment ID'yi oluştur (0.1, 0.2, etc.)
+    const attid = `0.${attachmentIndex}`;
+
+    // Message-Id ve Thread-Id'yi encode et
+    const encodedMessageId = encodeURIComponent(messageId);
+    const encodedThreadId = encodeURIComponent(threadId);
+
+    // Gmail attachment URL'sini oluştur
+    // Format: https://mail-attachment.googleusercontent.com/attachment/u/0/?ui=2&ik=<ik>&attid=<attid>&permmsgid=<messageId>&th=<threadId>&view=att&disp=safe&realattid=<realAttId>&zw
+    const gmailUrl = `https://mail-attachment.googleusercontent.com/attachment/u/0/?ui=2&ik=${ikToken}&attid=${attid}&permmsgid=${encodedMessageId}&th=${encodedThreadId}&view=att&disp=safe&realattid=${realAttId}&zw`;
+
+    console.log('Generated Gmail attachment URL from webhook:', {
+      attachmentIndex,
+      messageId,
+      threadId,
+      attid,
+      realAttId,
+      url: gmailUrl
+    });
+
+    return gmailUrl;
+  } catch (error) {
+    console.error('Error generating Gmail attachment URL from webhook:', error);
+    return null;
+  }
+};
 
 // Gmail attachment URL'sini düzelt
 const fixGmailAttachmentUrl = (url) => {
@@ -62,7 +243,7 @@ const saveDraft = async (req, res, next) => {
     // Eğer draftId varsa, mevcut taslağı güncelle
     if (draftId) {
       const existingDraft = await Mail.findOne({ _id: draftId, user: userId, folder: 'drafts' });
-      
+
       if (existingDraft) {
         // Mevcut taslağı güncelle
         if (recipients.length > 0) {
@@ -93,14 +274,14 @@ const saveDraft = async (req, res, next) => {
 
     // Yeni taslak oluştur - unique messageId oluştur
     let draftMessageId = `draft-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    
+
     // MessageId'nin unique olduğundan emin ol
     let existingDraft = await Mail.findOne({ messageId: draftMessageId });
     while (existingDraft) {
       draftMessageId = `draft-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       existingDraft = await Mail.findOne({ messageId: draftMessageId });
     }
-    
+
     const mailData = {
       from: {
         email: user.mailAddress,
@@ -187,16 +368,16 @@ const sendMail = async (req, res, next) => {
     if (!to || !subject || !content) {
       throw new CustomError.BadRequestError("Alıcı, konu ve içerik gereklidir");
     }
-    
+
     // Eğer planlı gönderim varsa, mail'i scheduled olarak kaydet
     if (scheduledSendAt) {
       const scheduledDate = new Date(scheduledSendAt);
       const now = new Date();
-      
+
       if (scheduledDate <= now) {
         throw new CustomError.BadRequestError("Planlı gönderim tarihi gelecekte olmalıdır");
       }
-      
+
       // Planlı mail olarak kaydet
       return await scheduleMailForLater(req, res, next);
     }
@@ -259,16 +440,16 @@ const sendMail = async (req, res, next) => {
     // Mail'i veritabanına kaydet
     // messageId unique olmalı - rastgele bir ID oluştur
     let uniqueMessageId = `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    
+
     // MessageId'nin unique olduğundan emin ol
     let existingMail = await Mail.findOne({ messageId: uniqueMessageId });
     while (existingMail) {
       uniqueMessageId = `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       existingMail = await Mail.findOne({ messageId: uniqueMessageId });
     }
-    
+
     mailData.messageId = uniqueMessageId;
-    
+
     const mail = new Mail(mailData);
     await mail.save();
     console.log("Mail saved to database with ID:", mail._id);
@@ -1023,7 +1204,7 @@ const testMailgunConfig = async (req, res, next) => {
 const checkMailAuthentication = async (req, res, next) => {
   try {
     const result = await mailgunService.checkMailAuthentication();
-    
+
     res.status(StatusCodes.OK).json({
       success: true,
       message: "Mail authentication durumu kontrol edildi",
@@ -1193,20 +1374,20 @@ const handleMailgunWebhook = async (req, res, next) => {
     console.log('📦 Body:', JSON.stringify(req.body, null, 2));
     console.log('📎 Files:', req.files ? req.files.map(f => ({ fieldname: f.fieldname, originalname: f.originalname, mimetype: f.mimetype, size: f.size })) : 'No files');
     console.log('📄 Content-Type:', req.headers['content-type']);
-    
+
     // Eğer body boşsa ve multipart/form-data değilse, bu bir test isteği olabilir
     if (!req.body || Object.keys(req.body).length === 0) {
       console.log('⚠️ Empty webhook body - might be a test request');
       return res.status(StatusCodes.OK).json({ message: 'Webhook endpoint is working', status: 'ok' });
     }
-    
+
     // Hemen 200 döndür - Mailgun'un tekrar denemesini engelle ve timeout'u önle
     res.status(StatusCodes.OK).json({ message: 'Webhook received', status: 'processing' });
-    
+
     // Gmail kontrolü - tüm olası sender alanlarını kontrol et
     const sender = req.body?.sender || req.body?.from || req.body?.['Return-Path'] || req.body?.['X-Sender'] || '';
     const senderEmail = typeof sender === 'string' ? sender : '';
-    
+
     if (senderEmail && (senderEmail.includes('@gmail.com') || senderEmail.includes('googlemail.com'))) {
       console.log('📧 ===== GMAIL MAIL DETECTED! =====');
       console.log('📧 Sender:', sender);
@@ -1217,10 +1398,10 @@ const handleMailgunWebhook = async (req, res, next) => {
       console.log('📧 References:', req.body?.['References'] || req.body?.['references']);
       console.log('📧 Spam Score:', req.body?.['X-Mailgun-Sscore'] || req.body?.['X-Spam-Score']);
       console.log('📧 Spam Flag:', req.body?.['X-Mailgun-Flag'] || req.body?.['X-Spam-Flag']);
-      
+
       // Tüm Gmail/Google ile ilgili key'leri listele
-      const gmailKeys = Object.keys(req.body || {}).filter(k => 
-        k.toLowerCase().includes('gmail') || 
+      const gmailKeys = Object.keys(req.body || {}).filter(k =>
+        k.toLowerCase().includes('gmail') ||
         k.toLowerCase().includes('google') ||
         k.toLowerCase().includes('sender') ||
         k.toLowerCase().includes('from') ||
@@ -1229,12 +1410,12 @@ const handleMailgunWebhook = async (req, res, next) => {
       console.log('📧 Gmail-related keys:', gmailKeys);
       console.log('📧 ==================================');
     }
-    
+
     // Reply kontrolü
     const subject = req.body?.subject || '';
-    const isReplyFromSubject = subject.toLowerCase().startsWith('re:') || 
-                              subject.toLowerCase().startsWith('fw:') || 
-                              subject.toLowerCase().startsWith('fwd:');
+    const isReplyFromSubject = subject.toLowerCase().startsWith('re:') ||
+      subject.toLowerCase().startsWith('fw:') ||
+      subject.toLowerCase().startsWith('fwd:');
     if (isReplyFromSubject || req.body?.['In-Reply-To'] || req.body?.['in-reply-to']) {
       console.log('📧 ===== REPLY MAIL DETECTED! =====');
       console.log('📧 Subject:', subject);
@@ -1242,7 +1423,7 @@ const handleMailgunWebhook = async (req, res, next) => {
       console.log('📧 References:', req.body?.['References'] || req.body?.['references']);
       console.log('📧 =================================');
     }
-    
+
     console.log('================================');
 
     let webhookData = req.body;
@@ -1250,7 +1431,7 @@ const handleMailgunWebhook = async (req, res, next) => {
     // Eğer files varsa, bunları Cloudinary'ye yükle ve webhookData'ya ekle
     if (req.files && req.files.length > 0) {
       console.log('Processing uploaded files...');
-      
+
       // Tüm dosyaları Cloudinary'ye yükle (paralel)
       const uploadPromises = req.files.map(async (file, index) => {
         console.log(`File ${index}:`, {
@@ -1267,9 +1448,9 @@ const handleMailgunWebhook = async (req, res, next) => {
             file.originalname,
             file.mimetype
           );
-          
+
           console.log(`✅ Uploaded to Cloudinary: ${file.originalname} -> ${cloudinaryUrl}`);
-          
+
           return {
             index,
             file,
@@ -1277,7 +1458,7 @@ const handleMailgunWebhook = async (req, res, next) => {
           };
         } catch (error) {
           console.error(`❌ Failed to upload ${file.originalname} to Cloudinary:`, error);
-          
+
           // Hata durumunda da devam et ama URL olmadan
           return {
             index,
@@ -1289,14 +1470,14 @@ const handleMailgunWebhook = async (req, res, next) => {
 
       // Tüm yüklemelerin tamamlanmasını bekle
       const uploadResults = await Promise.all(uploadPromises);
-      
+
       // Sonuçları webhookData'ya ekle
       uploadResults.forEach(({ index, file, cloudinaryUrl }) => {
         const attachmentIndex = index + 1;
         webhookData[`attachment-${attachmentIndex}`] = file.originalname;
         webhookData[`attachment-${attachmentIndex}-content-type`] = file.mimetype;
         webhookData[`attachment-${attachmentIndex}-size`] = file.size.toString();
-        
+
         // Cloudinary URL'sini kullan
         if (cloudinaryUrl) {
           webhookData[`attachment-${attachmentIndex}-url`] = cloudinaryUrl;
@@ -1306,49 +1487,67 @@ const handleMailgunWebhook = async (req, res, next) => {
         }
       });
 
-      // Eski Gmail URL bulma kodunu koruyalım (fallback için - Cloudinary başarısız olursa)
-      req.files.forEach((file, index) => {
-        const attachmentIndex = index + 1;
+      // Gmail'den gelen mailler için attachment URL'lerini oluştur (Cloudinary başarısız olursa)
+      const sender = webhookData['sender'] || webhookData['from'] || '';
+      const isGmail = sender.includes('@gmail.com') || sender.includes('@googlemail.com');
 
-        // Eğer Cloudinary URL'si yoksa Gmail attachment URL'sini bul
-        if (!webhookData[`attachment-${attachmentIndex}-url`]) {
-          let attachmentUrl = webhookData[`${file.fieldname}-url`] ||
-            webhookData[`url-${attachmentIndex}`] ||
-            null;
+      if (isGmail) {
+        console.log('📧 Gmail mail detected, generating attachment URLs...');
 
-          if (attachmentUrl) {
-            // Gmail attachment URL'sini düzelt
-            const fixedUrl = fixGmailAttachmentUrl(attachmentUrl);
-            webhookData[`attachment-${attachmentIndex}-url`] = fixedUrl;
-            console.log(`Found attachment URL for ${file.originalname}: ${fixedUrl}`);
-          } else {
-            // Gmail attachment URL'sini content-id-map'ten çıkarmaya çalış
-            const contentIdMap = webhookData['content-id-map'];
-            if (contentIdMap) {
-              try {
-                const idMap = JSON.parse(contentIdMap);
-                const contentIds = Object.keys(idMap);
-                if (contentIds.length > index) {
-                  const contentId = contentIds[index];
-                  // Gmail attachment URL formatı - Message-Id'yi encode et
-                  const messageId = encodeURIComponent(webhookData['Message-Id']);
-                  const realAttId = contentId.replace('<', '').replace('>', '');
-                  const gmailUrl = `https://mail-attachment.googleusercontent.com/attachment/u/0/?ui=2&ik=7ac7c89a8e&attid=0.${attachmentIndex}&permmsgid=${messageId}&th=${messageId}&view=att&disp=safe&realattid=${realAttId}&zw`;
-                  webhookData[`attachment-${attachmentIndex}-url`] = gmailUrl;
-                  console.log(`Generated Gmail URL for ${file.originalname}: ${gmailUrl}`);
-                }
-              } catch (e) {
-                console.log('Could not parse content-id-map:', e.message);
-              }
+        // Her attachment için Gmail URL'sini oluştur
+        for (let index = 0; index < req.files.length; index++) {
+          const attachmentIndex = index + 1;
+          const file = req.files[index];
+
+          // Eğer Cloudinary URL'si yoksa Gmail attachment URL'sini oluştur
+          if (!webhookData[`attachment-${attachmentIndex}-url`]) {
+            const attachmentInfo = {
+              filename: file.originalname,
+              contentType: file.mimetype,
+              size: file.size
+            };
+
+            // Gmail attachment URL'sini webhook verilerinden oluştur
+            const gmailUrl = await generateGmailAttachmentUrlFromWebhook(webhookData, attachmentIndex, attachmentInfo);
+
+            if (gmailUrl) {
+              webhookData[`attachment-${attachmentIndex}-url`] = gmailUrl;
+              console.log(`✅ Generated Gmail URL for ${file.originalname}: ${gmailUrl}`);
+            } else {
+              console.warn(`⚠️ Could not generate Gmail URL for ${file.originalname}`);
             }
           }
-        }
 
-        // Eğer fieldname attachment içeriyorsa, o field'ı da ekle
-        if (file.fieldname.includes('attachment')) {
-          webhookData[file.fieldname] = file.originalname;
+          // Eğer fieldname attachment içeriyorsa, o field'ı da ekle
+          if (file.fieldname.includes('attachment')) {
+            webhookData[file.fieldname] = file.originalname;
+          }
         }
-      });
+      } else {
+        // Gmail değilse, normal URL bulma kodunu kullan
+        req.files.forEach((file, index) => {
+          const attachmentIndex = index + 1;
+
+          // Eğer Cloudinary URL'si yoksa attachment URL'sini bul
+          if (!webhookData[`attachment-${attachmentIndex}-url`]) {
+            let attachmentUrl = webhookData[`${file.fieldname}-url`] ||
+              webhookData[`url-${attachmentIndex}`] ||
+              null;
+
+            if (attachmentUrl) {
+              // Gmail attachment URL'sini düzelt
+              const fixedUrl = fixGmailAttachmentUrl(attachmentUrl);
+              webhookData[`attachment-${attachmentIndex}-url`] = fixedUrl;
+              console.log(`Found attachment URL for ${file.originalname}: ${fixedUrl}`);
+            }
+          }
+
+          // Eğer fieldname attachment içeriyorsa, o field'ı da ekle
+          if (file.fieldname.includes('attachment')) {
+            webhookData[file.fieldname] = file.originalname;
+          }
+        });
+      }
 
       // Attachment count'u güncelle
       webhookData['attachment-count'] = req.files.length.toString();
@@ -1381,7 +1580,7 @@ const extractEmailAddress = (value) => {
     console.log('⚠️ extractEmailAddress: Invalid value (not a string):', value);
     return value;
   }
-  
+
   const originalValue = value;
   const match = value.match(/<([^>]+)>/);
   if (match && match[1]) {
@@ -1391,7 +1590,7 @@ const extractEmailAddress = (value) => {
     }
     return extracted;
   }
-  
+
   // Eğer < > yoksa ve boşluk içeriyorsa son parçayı seç (çoğu durumda email olur)
   if (value.includes(' ') && value.includes('@')) {
     const parts = value.split(/\s+/);
@@ -1402,7 +1601,7 @@ const extractEmailAddress = (value) => {
     }
     return result;
   }
-  
+
   const trimmed = value.trim();
   if (trimmed.includes('@gmail.com')) {
     console.log('📧 Gmail email (direct):', trimmed);
@@ -1414,39 +1613,39 @@ const extractEmailAddress = (value) => {
 const processWebhookData = async (webhookData, res = null) => {
   // Webhook data'yı sakla (hata durumunda kullanmak için)
   const originalWebhookData = webhookData;
-  
+
   try {
     console.log('=== PROCESSING WEBHOOK DATA ===');
     console.log('📧 Webhook data keys:', Object.keys(webhookData));
     console.log('📧 Full webhook data:', JSON.stringify(webhookData, null, 2));
-    
+
     // Mailgun webhook verisini kontrol et - recipient'ı farklı alanlarda ara
-    let recipient = webhookData['recipient'] || 
-                    webhookData['To'] || 
-                    webhookData['to'] || 
-                    webhookData['X-Recipient'] ||
-                    webhookData['X-Original-To'] ||
-                    null;
-    
+    let recipient = webhookData['recipient'] ||
+      webhookData['To'] ||
+      webhookData['to'] ||
+      webhookData['X-Recipient'] ||
+      webhookData['X-Original-To'] ||
+      null;
+
     if (!recipient && webhookData['to'] && typeof webhookData['to'] === 'string') {
       // "Name <email@domain>" formatından email'i çıkar
       recipient = extractEmailAddress(webhookData['to']);
     }
-    
+
     if (!webhookData || !recipient) {
       console.log('❌ Invalid webhook data - missing recipient');
       console.log('Available keys:', Object.keys(webhookData || {}));
-      console.log('All recipient-related keys:', Object.keys(webhookData || {}).filter(k => 
-        k.toLowerCase().includes('recipient') || 
+      console.log('All recipient-related keys:', Object.keys(webhookData || {}).filter(k =>
+        k.toLowerCase().includes('recipient') ||
         k.toLowerCase().includes('to') ||
         k.toLowerCase() === 'to'
       ));
       // Response zaten gönderildi, sadece logla
       return;
     }
-    
+
     console.log('✅ Recipient found:', recipient);
-    
+
     // Mailgun webhook verilerini parse et
     const senderRaw = webhookData['sender'] || webhookData['from'] || webhookData['Return-Path'] || webhookData['X-Sender'] || 'unknown@example.com';
     const sender = extractEmailAddress(senderRaw);
@@ -1458,18 +1657,18 @@ const processWebhookData = async (webhookData, res = null) => {
 
     // Spam kontrolü - Mailgun spam score
     const spamScore = webhookData['X-Mailgun-Sscore'] || webhookData['X-Spam-Score'] || webhookData['spam-score'] || null;
-    const isSpam = webhookData['X-Mailgun-Flag'] === 'yes' || 
-                   webhookData['X-Spam-Flag'] === 'yes' || 
-                   (spamScore && parseFloat(spamScore) > 5.0);
-    
+    const isSpam = webhookData['X-Mailgun-Flag'] === 'yes' ||
+      webhookData['X-Spam-Flag'] === 'yes' ||
+      (spamScore && parseFloat(spamScore) > 5.0);
+
     // Reply kontrolü - Subject veya header'lardan
-    const isReply = subject.toLowerCase().startsWith('re:') || 
-                   subject.toLowerCase().startsWith('fw:') || 
-                   subject.toLowerCase().startsWith('fwd:') ||
-                   webhookData['In-Reply-To'] || 
-                   webhookData['in-reply-to'] ||
-                   webhookData['References'] ||
-                   webhookData['references'];
+    const isReply = subject.toLowerCase().startsWith('re:') ||
+      subject.toLowerCase().startsWith('fw:') ||
+      subject.toLowerCase().startsWith('fwd:') ||
+      webhookData['In-Reply-To'] ||
+      webhookData['in-reply-to'] ||
+      webhookData['References'] ||
+      webhookData['references'];
 
     console.log('📨 Parsed email data:');
     console.log('   Recipient:', recipient);
@@ -1483,7 +1682,7 @@ const processWebhookData = async (webhookData, res = null) => {
     console.log('   Is Reply?', isReply);
     console.log('   Body Plain length:', bodyPlain.length);
     console.log('   Body HTML length:', bodyHtml.length);
-    
+
     // Gmail için özel loglar
     if (sender.includes('@gmail.com')) {
       console.log('📧 GMAIL MAIL DETAILS:');
@@ -1542,7 +1741,7 @@ const processWebhookData = async (webhookData, res = null) => {
       isSpam: isSpam,
       spamScore: spamScore
     });
-    
+
     // Spam olarak işaretlenmiş olsa bile yakalayalım (spam klasörüne koyarız)
     if (isSpam) {
       console.log('⚠️ Mail spam olarak işaretlenmiş, yine de yakalıyoruz (spam klasörüne gidecek)');
@@ -1555,11 +1754,11 @@ const processWebhookData = async (webhookData, res = null) => {
     if (!recipientUser) {
       console.log('❌ Recipient user not found for mail address:', recipient);
       console.log('🔍 Attempting to find user by email in database...');
-      
+
       // Alternatif arama - belki farklı bir formatta kaydedilmiş olabilir
       const allUsers = await User.find({}).select('mailAddress name').limit(10);
       console.log('📋 Sample users in database:', allUsers.map(u => ({ id: u._id, mailAddress: u.mailAddress, name: u.name })));
-      
+
       // Response zaten gönderildi, sadece logla
       console.log('⚠️ User not found but webhook accepted, recipient:', recipient);
       return;
@@ -1570,6 +1769,192 @@ const processWebhookData = async (webhookData, res = null) => {
       name: recipientUser.name,
       mailAddress: recipientUser.mailAddress
     });
+
+    // Gmail'den gelen mailler için storage URL'den attachment'ları al
+    const senderForGmail = webhookData['sender'] || webhookData['from'] || '';
+    const isGmail = senderForGmail.includes('@gmail.com') || senderForGmail.includes('@googlemail.com');
+
+    // Gmail'den gelen mailler için storage URL'den attachment'ları al ve Cloudinary'ye yükle
+    if (isGmail && !webhookData['_multerProcessed']) {
+      console.log('📧 Gmail mail detected, fetching attachments from storage and uploading to Cloudinary...');
+
+      // Storage URL'ini kontrol et
+      let storageUrl = webhookData['storage-url'] ||
+        webhookData['storage.url'] ||
+        webhookData['storage']?.url?.[0] ||
+        webhookData['storage']?.url ||
+        null;
+
+      if (Array.isArray(storageUrl)) {
+        storageUrl = storageUrl[0];
+      }
+
+      if (storageUrl && process.env.MAILGUN_API_KEY) {
+        try {
+          console.log(`📦 Fetching message from Mailgun storage: ${storageUrl}`);
+
+          // Mailgun storage API'sinden mesajı al
+          const storageResponse = await axios.get(storageUrl, {
+            auth: {
+              username: 'api',
+              password: process.env.MAILGUN_API_KEY
+            },
+            headers: {
+              'Accept': 'message/rfc2822' // MIME formatında al
+            },
+            timeout: 30000, // 30 saniye timeout (büyük dosyalar için)
+            responseType: 'arraybuffer' // Binary data için
+          });
+
+          // MIME mesajını parse et
+          const mimeMessage = Buffer.from(storageResponse.data).toString('utf-8');
+          console.log(`📦 Message fetched from storage, length: ${mimeMessage.length}`);
+
+          // Attachment'ları MIME mesajından çıkar ve Cloudinary'ye yükle
+          // MIME formatında attachment'lar genellikle şu şekilde:
+          // Content-Type: image/png; name="filename.png"
+          // Content-Disposition: attachment; filename="filename.png"
+          // Content-Transfer-Encoding: base64
+
+          // Multipart mesajı parse et
+          const boundaryMatch = mimeMessage.match(/boundary="?([^"\r\n]+)"?/i) || mimeMessage.match(/boundary=([^\r\n;]+)/i);
+          if (boundaryMatch) {
+            const boundary = boundaryMatch[1].trim();
+            const parts = mimeMessage.split(`--${boundary}`);
+            
+            console.log(`📦 Found ${parts.length} MIME parts with boundary: ${boundary}`);
+            
+            let uploadedCount = 0;
+            
+            // Her part'ı kontrol et
+            for (let partIndex = 0; partIndex < parts.length; partIndex++) {
+              const part = parts[partIndex].trim();
+              
+              // Boş part'ları atla
+              if (!part || part === '--' || part.length < 10) continue;
+              
+              // Content-Disposition: attachment kontrolü
+              if (part.includes('Content-Disposition: attachment') || part.includes('Content-Disposition:attachment')) {
+                // Filename'i çıkar
+                const filenameMatch = part.match(/filename="?([^"\r\n]+)"?/i) || part.match(/name="?([^"\r\n;]+)"?/i);
+                if (!filenameMatch) {
+                  console.log(`⚠️ No filename found in part ${partIndex}`);
+                  continue;
+                }
+                
+                let filename = filenameMatch[1].replace(/['"]/g, '').trim();
+                
+                // Filename'de encoding varsa decode et (RFC 2047)
+                if (filename.includes('=?') && filename.includes('?=')) {
+                  const decodedMatch = filename.match(/=\?([^?]+)\?([BQ])\?([^?]+)\?=/i);
+                  if (decodedMatch) {
+                    const charset = decodedMatch[1];
+                    const encoding = decodedMatch[2].toUpperCase();
+                    const encodedText = decodedMatch[3];
+                    
+                    if (encoding === 'B') {
+                      // Base64
+                      filename = Buffer.from(encodedText, 'base64').toString(charset || 'utf-8');
+                    } else if (encoding === 'Q') {
+                      // Quoted-printable
+                      filename = encodedText.replace(/=([0-9A-F]{2})/gi, (match, hex) => {
+                        return String.fromCharCode(parseInt(hex, 16));
+                      });
+                    }
+                  }
+                }
+                
+                // Content-Type'ı çıkar
+                const contentTypeMatch = part.match(/Content-Type:\s*([^\r\n;]+)/i);
+                const contentType = contentTypeMatch ? contentTypeMatch[1].trim() : 'application/octet-stream';
+                
+                // Content-Transfer-Encoding'i kontrol et
+                const encodingMatch = part.match(/Content-Transfer-Encoding:\s*([^\r\n]+)/i);
+                const encoding = encodingMatch ? encodingMatch[1].trim().toLowerCase() : '7bit';
+                
+                // Content'i çıkar (header'lardan sonra)
+                const headerEndIndex = part.indexOf('\r\n\r\n');
+                if (headerEndIndex === -1) {
+                  console.log(`⚠️ No content found in part ${partIndex}`);
+                  continue;
+                }
+                
+                let content = part.substring(headerEndIndex + 4).trim();
+                
+                // Base64 veya quoted-printable decode
+                let fileBuffer;
+                try {
+                  if (encoding === 'base64') {
+                    // Base64'ü decode et - whitespace'leri temizle
+                    content = content.replace(/\s/g, '');
+                    fileBuffer = Buffer.from(content, 'base64');
+                  } else if (encoding === 'quoted-printable') {
+                    // Quoted-printable decode
+                    content = content.replace(/=\r?\n/g, ''); // Soft line breaks
+                    content = content.replace(/=([0-9A-F]{2})/gi, (match, hex) => {
+                      return String.fromCharCode(parseInt(hex, 16));
+                    });
+                    fileBuffer = Buffer.from(content, 'utf-8');
+                  } else {
+                    // 7bit veya 8bit - direkt kullan
+                    fileBuffer = Buffer.from(content, 'utf-8');
+                  }
+                  
+                  if (fileBuffer.length === 0) {
+                    console.log(`⚠️ Empty file buffer for ${filename}`);
+                    continue;
+                  }
+                  
+                  console.log(`📦 Processing attachment: ${filename} (${fileBuffer.length} bytes, ${contentType}, encoding: ${encoding})`);
+                  
+                  // Cloudinary'ye yükle
+                  const cloudinaryUrl = await uploadFileToCloudinary(fileBuffer, filename, contentType);
+                  
+                  // Webhook data'ya ekle
+                  uploadedCount++;
+                  webhookData[`attachment-${uploadedCount}`] = filename;
+                  webhookData[`attachment-${uploadedCount}-url`] = cloudinaryUrl;
+                  webhookData[`attachment-${uploadedCount}-size`] = fileBuffer.length.toString();
+                  webhookData[`attachment-${uploadedCount}-content-type`] = contentType;
+                  
+                  console.log(`✅ Uploaded Gmail attachment to Cloudinary: ${filename} -> ${cloudinaryUrl}`);
+                } catch (uploadError) {
+                  console.error(`❌ Failed to upload ${filename} to Cloudinary:`, uploadError.message);
+                }
+              }
+            }
+            
+            // Attachment count'u güncelle
+            webhookData['attachment-count'] = uploadedCount.toString();
+            
+            console.log(`✅ Uploaded ${uploadedCount} Gmail attachment(s) to Cloudinary`);
+          } else {
+            console.log('⚠️ No boundary found in MIME message');
+            
+            // Alternatif: Tüm Content-ID'leri bul
+            const allContentIds = [];
+            const contentIdRegex = /Content-ID:\s*<([^>]+)>/gi;
+            let contentIdMatch;
+            while ((contentIdMatch = contentIdRegex.exec(mimeMessage)) !== null) {
+              allContentIds.push(contentIdMatch[1]);
+            }
+            console.log(`📦 Found ${allContentIds.length} Content-ID(s):`, allContentIds);
+            
+            // Webhook data'ya Content-ID'leri ekle
+            allContentIds.forEach((contentId, index) => {
+              webhookData[`Content-ID-${index + 1}`] = `<${contentId}>`;
+              webhookData[`content-id-${index + 1}`] = `<${contentId}>`;
+            });
+          }
+        } catch (storageError) {
+          console.error('❌ Error fetching message from Mailgun storage:', storageError.message);
+          console.error('Storage URL:', storageUrl);
+        }
+      } else {
+        console.log('⚠️ No storage URL found in webhook data or MAILGUN_API_KEY not set');
+        console.log('Webhook data keys:', Object.keys(webhookData).filter(k => k.toLowerCase().includes('storage')));
+      }
+    }
 
     // Attachment'ları parse et - Gmail için geliştirilmiş parsing
     const attachments = [];
@@ -1616,17 +2001,35 @@ const processWebhookData = async (webhookData, res = null) => {
           // Duplicate kontrolü - aynı filename zaten varsa ekleme
           const existingAttachment = attachments.find(att => att.filename === attachmentName);
           if (!existingAttachment) {
-            // Gmail attachment URL'sini düzelt
-            const fixedUrl = fixGmailAttachmentUrl(attachmentUrl);
+            // Gmail'den gelen mailler için attachment URL'sini oluştur
+            let finalUrl = attachmentUrl ? fixGmailAttachmentUrl(attachmentUrl) : null;
+
+            // Eğer URL yoksa ve Gmail'den geliyorsa, webhook verilerinden oluştur
+            if (!finalUrl && isGmail) {
+              const attachmentInfo = {
+                filename: attachmentName,
+                contentType: attachmentType || 'application/octet-stream',
+                size: attachmentSize ? parseInt(attachmentSize) : 0
+              };
+
+              // Gmail attachment URL'sini webhook verilerinden oluştur
+              finalUrl = await generateGmailAttachmentUrlFromWebhook(webhookData, i, attachmentInfo);
+
+              if (finalUrl) {
+                console.log(`✅ Generated Gmail URL for ${attachmentName}: ${finalUrl}`);
+              } else {
+                console.warn(`⚠️ Could not generate Gmail URL for ${attachmentName}`);
+              }
+            }
 
             attachments.push({
               filename: attachmentName,
               originalName: attachmentName,
               mimeType: attachmentType || 'application/octet-stream',
               size: attachmentSize ? parseInt(attachmentSize) : 0,
-              url: fixedUrl || null
+              url: finalUrl || null
             });
-            console.log(`Added attachment: ${attachmentName} with URL: ${fixedUrl || 'null'}`);
+            console.log(`Added attachment: ${attachmentName} with URL: ${finalUrl || 'null'}`);
           }
         }
       }
@@ -1779,83 +2182,83 @@ const processWebhookData = async (webhookData, res = null) => {
             }
           }
         });
-        
+
         gmailAttachmentKeys.forEach(key => {
-        const value = webhookData[key];
-        console.log(`Checking Gmail key: ${key} = ${value}`);
+          const value = webhookData[key];
+          console.log(`Checking Gmail key: ${key} = ${value}`);
 
-        if (value && typeof value === 'string') {
-          // Dosya uzantısı kontrolü
-          const hasFileExtension = /\.(jpg|jpeg|png|gif|pdf|doc|docx|txt|zip|rar|mp4|mp3|avi|mov|wav|mp3|ppt|pptx|xls|xlsx)$/i.test(value);
-          const isUrl = value.startsWith('http');
-          const isBase64 = value.includes('base64') || value.includes('data:');
-          const isGmailAttachment = value.includes('mail.google.com') || value.includes('attachment');
+          if (value && typeof value === 'string') {
+            // Dosya uzantısı kontrolü
+            const hasFileExtension = /\.(jpg|jpeg|png|gif|pdf|doc|docx|txt|zip|rar|mp4|mp3|avi|mov|wav|mp3|ppt|pptx|xls|xlsx)$/i.test(value);
+            const isUrl = value.startsWith('http');
+            const isBase64 = value.includes('base64') || value.includes('data:');
+            const isGmailAttachment = value.includes('mail.google.com') || value.includes('attachment');
 
-          console.log(`Gmail attachment analysis for ${key}:`, {
-            hasFileExtension,
-            isUrl,
-            isBase64,
-            isGmailAttachment,
-            value: value.substring(0, 100) + (value.length > 100 ? '...' : '')
-          });
+            console.log(`Gmail attachment analysis for ${key}:`, {
+              hasFileExtension,
+              isUrl,
+              isBase64,
+              isGmailAttachment,
+              value: value.substring(0, 100) + (value.length > 100 ? '...' : '')
+            });
 
-          if (hasFileExtension || isUrl || isGmailAttachment) {
-            console.log(`Processing Gmail attachment key: ${key} = ${value}`);
+            if (hasFileExtension || isUrl || isGmailAttachment) {
+              console.log(`Processing Gmail attachment key: ${key} = ${value}`);
 
-            // JSON formatındaki değerleri atla (content-id-map gibi)
-            if (value.includes('{') && value.includes('}')) {
-              console.log(`Skipping JSON value: ${key} = ${value}`);
-              return;
-            }
+              // JSON formatındaki değerleri atla (content-id-map gibi)
+              if (value.includes('{') && value.includes('}')) {
+                console.log(`Skipping JSON value: ${key} = ${value}`);
+                return;
+              }
 
-            // Dosya adını çıkar
-            let filename = value;
-            if (value.includes('/')) {
-              filename = value.split('/').pop() || value;
-            }
-            if (value.includes('\\')) {
-              filename = value.split('\\').pop() || filename;
-            }
+              // Dosya adını çıkar
+              let filename = value;
+              if (value.includes('/')) {
+                filename = value.split('/').pop() || value;
+              }
+              if (value.includes('\\')) {
+                filename = value.split('\\').pop() || filename;
+              }
 
-            // URL'yi bul
-            const url = value.startsWith('http') ? value : null;
+              // URL'yi bul
+              const url = value.startsWith('http') ? value : null;
 
-            // MIME type'ı tahmin et
-            let mimeType = 'application/octet-stream';
-            if (filename.includes('.jpg') || filename.includes('.jpeg')) mimeType = 'image/jpeg';
-            else if (filename.includes('.png')) mimeType = 'image/png';
-            else if (filename.includes('.gif')) mimeType = 'image/gif';
-            else if (filename.includes('.pdf')) mimeType = 'application/pdf';
-            else if (filename.includes('.doc')) mimeType = 'application/msword';
-            else if (filename.includes('.docx')) mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-            else if (filename.includes('.txt')) mimeType = 'text/plain';
-            else if (filename.includes('.zip')) mimeType = 'application/zip';
-            else if (filename.includes('.rar')) mimeType = 'application/x-rar-compressed';
-            else if (filename.includes('.mp4')) mimeType = 'video/mp4';
-            else if (filename.includes('.mp3')) mimeType = 'audio/mpeg';
-            else if (filename.includes('.ppt')) mimeType = 'application/vnd.ms-powerpoint';
-            else if (filename.includes('.pptx')) mimeType = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
-            else if (filename.includes('.xls')) mimeType = 'application/vnd.ms-excel';
-            else if (filename.includes('.xlsx')) mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+              // MIME type'ı tahmin et
+              let mimeType = 'application/octet-stream';
+              if (filename.includes('.jpg') || filename.includes('.jpeg')) mimeType = 'image/jpeg';
+              else if (filename.includes('.png')) mimeType = 'image/png';
+              else if (filename.includes('.gif')) mimeType = 'image/gif';
+              else if (filename.includes('.pdf')) mimeType = 'application/pdf';
+              else if (filename.includes('.doc')) mimeType = 'application/msword';
+              else if (filename.includes('.docx')) mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+              else if (filename.includes('.txt')) mimeType = 'text/plain';
+              else if (filename.includes('.zip')) mimeType = 'application/zip';
+              else if (filename.includes('.rar')) mimeType = 'application/x-rar-compressed';
+              else if (filename.includes('.mp4')) mimeType = 'video/mp4';
+              else if (filename.includes('.mp3')) mimeType = 'audio/mpeg';
+              else if (filename.includes('.ppt')) mimeType = 'application/vnd.ms-powerpoint';
+              else if (filename.includes('.pptx')) mimeType = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+              else if (filename.includes('.xls')) mimeType = 'application/vnd.ms-excel';
+              else if (filename.includes('.xlsx')) mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
-            // Eğer bu attachment zaten eklenmemişse ekle
-            const existingAttachment = attachments.find(att => att.filename === filename);
-            if (!existingAttachment) {
-              // Gmail attachment URL'sini düzelt
-              const fixedUrl = fixGmailAttachmentUrl(url);
+              // Eğer bu attachment zaten eklenmemişse ekle
+              const existingAttachment = attachments.find(att => att.filename === filename);
+              if (!existingAttachment) {
+                // Gmail attachment URL'sini düzelt
+                const fixedUrl = fixGmailAttachmentUrl(url);
 
-              attachments.push({
-                filename: filename,
-                originalName: filename,
-                mimeType: mimeType,
-                size: 0, // Gmail'den gelen attachment'larda size bilgisi olmayabilir
-                url: fixedUrl
-              });
-              console.log(`Added Gmail attachment: ${filename}`);
+                attachments.push({
+                  filename: filename,
+                  originalName: filename,
+                  mimeType: mimeType,
+                  size: 0, // Gmail'den gelen attachment'larda size bilgisi olmayabilir
+                  url: fixedUrl
+                });
+                console.log(`Added Gmail attachment: ${filename}`);
+              }
             }
           }
-        }
-      });
+        });
       }
     }
 
@@ -2042,11 +2445,11 @@ const processWebhookData = async (webhookData, res = null) => {
 
     // Mail objesi oluştur
     console.log('📝 Creating mail object...');
-    
+
     // Folder belirleme: Spam ise spam klasörüne, değilse inbox'a
     // Spam olsa bile yakalıyoruz (kullanıcı kontrol edebilir)
     const mailFolder = isSpam ? 'spam' : 'inbox';
-    
+
     // Gmail ve reply kontrolü
     if (sender.includes('@gmail.com')) {
       console.log('📧 Gmail mail yakalanıyor - folder:', mailFolder);
@@ -2054,7 +2457,7 @@ const processWebhookData = async (webhookData, res = null) => {
     if (isReply) {
       console.log('📧 Reply mail yakalanıyor - folder:', mailFolder);
     }
-    
+
     const mailData = {
       from: {
         email: sender,
@@ -2120,7 +2523,7 @@ const processWebhookData = async (webhookData, res = null) => {
       attachmentsCount: attachments.length
     });
     console.log('=== WEBHOOK PROCESSING COMPLETE ===');
-    
+
     // Response zaten gönderildi, sadece logla
     console.log('✅ Mail processing completed successfully:', {
       mailId: mail._id,
@@ -2132,7 +2535,7 @@ const processWebhookData = async (webhookData, res = null) => {
     console.error('❌ Error stack:', error.stack);
     console.error('❌ Error name:', error.name);
     console.error('❌ Error message:', error.message);
-    
+
     // Gmail'den gelen mail için özel log
     try {
       if (originalWebhookData && originalWebhookData['sender']) {
@@ -2150,7 +2553,7 @@ const processWebhookData = async (webhookData, res = null) => {
     } catch (logError) {
       console.error('Error logging Gmail details:', logError);
     }
-    
+
     // Response zaten gönderildi, sadece logla
     console.error('❌ Webhook processing failed but response already sent:', error.message);
   }
@@ -2491,11 +2894,11 @@ const updateScheduledMail = async (req, res, next) => {
     if (scheduledSendAt) {
       const scheduledDate = new Date(scheduledSendAt);
       const now = new Date();
-      
+
       if (scheduledDate <= now) {
         throw new CustomError.BadRequestError("Planlı gönderim tarihi gelecekte olmalıdır");
       }
-      
+
       mail.scheduledSendAt = scheduledDate;
     }
 
@@ -2504,17 +2907,17 @@ const updateScheduledMail = async (req, res, next) => {
       const recipients = Array.isArray(to) ? to : JSON.parse(to);
       mail.to = recipients.map(email => ({ email, name: email.split('@')[0] }));
     }
-    
+
     if (cc) {
       const ccRecipients = Array.isArray(cc) ? cc : JSON.parse(cc);
       mail.cc = ccRecipients.map(email => ({ email, name: email.split('@')[0] }));
     }
-    
+
     if (bcc) {
       const bccRecipients = Array.isArray(bcc) ? bcc : JSON.parse(bcc);
       mail.bcc = bccRecipients.map(email => ({ email, name: email.split('@')[0] }));
     }
-    
+
     if (subject !== undefined) mail.subject = subject;
     if (content !== undefined) mail.content = content;
     if (htmlContent !== undefined) mail.htmlContent = htmlContent;
@@ -2608,58 +3011,58 @@ const processScheduledMails = async () => {
           await mail.save();
           console.log(`Scheduled mail sent successfully: ${mail._id}`);
 
-      // Optional internal delivery fallback for scheduled mails to same-domain recipients
-      if ((process.env.INTERNAL_DELIVERY_FALLBACK || '').toLowerCase() !== 'false') {
-        console.log('[INTERNAL_FALLBACK] Enabled for scheduled send');
-        const domain = process.env.MAIL_DOMAIN || 'fitmail.com';
-        for (const recipient of mail.to) {
-          if (recipient.email.endsWith(`@${domain}`)) {
-            console.log(`[INTERNAL_FALLBACK] Creating inbox copy for scheduled recipient ${recipient.email}`);
-            const recipientUser = await User.findOne({ mailAddress: recipient.email });
-            if (recipientUser) {
-              console.log(`[INTERNAL_FALLBACK] Recipient user found: ${recipientUser._id}`);
-              if (mailgunResult.messageId) {
-                const dup = await Mail.findOne({ user: recipientUser._id, mailgunId: mailgunResult.messageId });
-                if (dup) {
-                  console.log('[INTERNAL_FALLBACK] Skipped creating scheduled inbox copy (already exists via webhook)');
-                  continue;
+          // Optional internal delivery fallback for scheduled mails to same-domain recipients
+          if ((process.env.INTERNAL_DELIVERY_FALLBACK || '').toLowerCase() !== 'false') {
+            console.log('[INTERNAL_FALLBACK] Enabled for scheduled send');
+            const domain = process.env.MAIL_DOMAIN || 'fitmail.com';
+            for (const recipient of mail.to) {
+              if (recipient.email.endsWith(`@${domain}`)) {
+                console.log(`[INTERNAL_FALLBACK] Creating inbox copy for scheduled recipient ${recipient.email}`);
+                const recipientUser = await User.findOne({ mailAddress: recipient.email });
+                if (recipientUser) {
+                  console.log(`[INTERNAL_FALLBACK] Recipient user found: ${recipientUser._id}`);
+                  if (mailgunResult.messageId) {
+                    const dup = await Mail.findOne({ user: recipientUser._id, mailgunId: mailgunResult.messageId });
+                    if (dup) {
+                      console.log('[INTERNAL_FALLBACK] Skipped creating scheduled inbox copy (already exists via webhook)');
+                      continue;
+                    }
+                  }
+                  let inboxMessageId = `inbox-scheduled-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                  let existingInboxMail = await Mail.findOne({ messageId: inboxMessageId });
+                  while (existingInboxMail) {
+                    inboxMessageId = `inbox-scheduled-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                    existingInboxMail = await Mail.findOne({ messageId: inboxMessageId });
+                  }
+                  const inboxMailData = {
+                    from: mail.from,
+                    to: [{ email: recipient.email, name: recipient.name }],
+                    cc: mail.cc,
+                    bcc: mail.bcc,
+                    subject: mail.subject,
+                    content: mail.content,
+                    htmlContent: mail.htmlContent,
+                    folder: 'inbox',
+                    status: 'delivered',
+                    isRead: false,
+                    labels: mail.labels || [],
+                    categories: [], // Normal maillerin promotions kategorisine düşmemesi için categories boş
+                    attachments: mail.attachments,
+                    user: recipientUser._id,
+                    messageId: inboxMessageId,
+                    inReplyTo: mail.messageId,
+                    receivedAt: new Date(),
+                    mailgunId: mailgunResult.messageId
+                  };
+                  const inboxMail = new Mail(inboxMailData);
+                  await inboxMail.save();
+                  recipientUser.mails.push(inboxMail._id);
+                  await recipientUser.save();
+                  console.log(`[INTERNAL_FALLBACK] Inbox copy created (scheduled): ${inboxMail._id}`);
                 }
               }
-              let inboxMessageId = `inbox-scheduled-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-              let existingInboxMail = await Mail.findOne({ messageId: inboxMessageId });
-              while (existingInboxMail) {
-                inboxMessageId = `inbox-scheduled-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-                existingInboxMail = await Mail.findOne({ messageId: inboxMessageId });
-              }
-              const inboxMailData = {
-                from: mail.from,
-                to: [{ email: recipient.email, name: recipient.name }],
-                cc: mail.cc,
-                bcc: mail.bcc,
-                subject: mail.subject,
-                content: mail.content,
-                htmlContent: mail.htmlContent,
-                folder: 'inbox',
-                status: 'delivered',
-                isRead: false,
-                labels: mail.labels || [],
-                categories: [], // Normal maillerin promotions kategorisine düşmemesi için categories boş
-                attachments: mail.attachments,
-                user: recipientUser._id,
-                messageId: inboxMessageId,
-                inReplyTo: mail.messageId,
-                receivedAt: new Date(),
-                mailgunId: mailgunResult.messageId
-              };
-              const inboxMail = new Mail(inboxMailData);
-              await inboxMail.save();
-              recipientUser.mails.push(inboxMail._id);
-              await recipientUser.save();
-              console.log(`[INTERNAL_FALLBACK] Inbox copy created (scheduled): ${inboxMail._id}`);
             }
           }
-        }
-      }
         } else {
           // Gönderim başarısız
           mail.status = 'failed';
@@ -2712,11 +3115,11 @@ const addReplyToMail = async (req, res, next) => {
     const attachmentNames = req.body.attachmentNames ? JSON.parse(req.body.attachmentNames) : [];
     const attachmentTypes = req.body.attachmentTypes ? JSON.parse(req.body.attachmentTypes) : [];
     const attachmentUrls = req.body.attachmentUrls ? JSON.parse(req.body.attachmentUrls) : [];
-    
+
     console.log("Attachment names:", attachmentNames);
     console.log("Attachment types:", attachmentTypes);
     console.log("Attachment URLs:", attachmentUrls);
-    
+
     const attachments = files.map((file, index) => ({
       filename: attachmentNames[index] || file.originalname,
       data: file.buffer,
@@ -2724,7 +3127,7 @@ const addReplyToMail = async (req, res, next) => {
       size: file.size,
       url: attachmentUrls[index] || null
     }));
-    
+
     console.log("Final attachments:", attachments.map(att => ({ filename: att.filename, url: att.url })));
 
     // Cevabı orijinal maile ekle
@@ -2738,17 +3141,17 @@ const addReplyToMail = async (req, res, next) => {
 
     // Cevap için yeni bir mail objesi oluştur (gönderilen kutusuna düşmesi için)
     const replySubject = originalMail.subject.startsWith('Re:') ? originalMail.subject : `Re: ${originalMail.subject}`;
-    
+
     // Unique messageId oluştur - duplicate hatası olmaması için
     let uniqueMessageId = `reply-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    
+
     // MessageId'nin unique olduğundan emin ol
     let existingReply = await Mail.findOne({ messageId: uniqueMessageId });
     while (existingReply) {
       uniqueMessageId = `reply-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       existingReply = await Mail.findOne({ messageId: uniqueMessageId });
     }
-    
+
     const replyMailData = {
       from: {
         email: user.mailAddress,
@@ -2795,7 +3198,7 @@ const addReplyToMail = async (req, res, next) => {
     console.log("Mailgun data for reply:", { ...mailgunData, attachments: mailgunData.attachments.map(att => ({ filename: att.filename, url: att.url })) });
     const mailgunResult = await mailgunService.sendMail(mailgunData);
     console.log("Mailgun result for reply:", mailgunResult);
-    
+
     if (mailgunResult.success) {
       // Cevap mail durumunu güncelle
       replyMail.status = 'sent';
