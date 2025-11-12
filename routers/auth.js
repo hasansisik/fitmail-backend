@@ -1,5 +1,5 @@
 const express = require('express');
-const {register,googleRegister,googleAuth,login,googleLogin,getMyProfile,getAllUsers,logout,verifyRecoveryEmail,forgotPassword,resetPassword,verifyEmail,againEmail,editProfile,verifyPassword,changePassword,updateSettings,deleteAccount,deleteUser,updateUserRole,updateUserStatus,checkEmailAvailability,checkPremiumCode,enable2FA,verify2FA,disable2FA,verify2FALogin,get2FAStatus,switchActive} = require('../controllers/auth');
+const {register,googleRegister,googleAuth,login,googleLogin,getMyProfile,getAllUsers,logout,verifyRecoveryEmail,forgotPassword,resetPassword,verifyEmail,againEmail,editProfile,verifyPassword,changePassword,updateSettings,deleteAccount,deleteUser,updateUserRole,updateUserStatus,checkEmailAvailability,checkPremiumCode,enable2FA,verify2FA,disable2FA,verify2FALogin,get2FAStatus,switchActive,getAllActiveSessions,removeSession} = require('../controllers/auth');
 const {isAuthenticated, isAdmin} = require('../middleware/authMiddleware');
 
 const router = express.Router();
@@ -22,6 +22,12 @@ router.post('/edit-profile',isAuthenticated, editProfile);
 router.post('/verify-password',isAuthenticated, verifyPassword);
 router.post('/change-password',isAuthenticated, changePassword);
 router.post('/update-settings',isAuthenticated, updateSettings);
+// Get all active sessions (users with valid tokens)
+// Accepts POST with email list in body, or GET for backward compatibility
+router.get('/sessions', isAuthenticated, getAllActiveSessions);
+router.post('/sessions', isAuthenticated, getAllActiveSessions);
+// Remove a specific session (delete all tokens for a user)
+router.post('/remove-session', isAuthenticated, removeSession);
 // Active account switch (requires being authenticated by any account)
 router.post('/switch-active', isAuthenticated, switchActive);
 router.delete('/delete-account',isAuthenticated, deleteAccount);

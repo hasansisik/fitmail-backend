@@ -1998,6 +1998,111 @@ const get2FAStatus = async (req, res, next) => {
   }
 };
 
+// Remove a specific session (delete all tokens for a user)
+const removeSession = async (req, res, next) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(StatusCodes.BAD_REQUEST).json({ message: 'E-posta gereklidir' });
+    }
+
+    // Find user by email
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(StatusCodes.NOT_FOUND).json({ message: 'Kullanıcı bulunamadı' });
+    }
+
+    // Delete all tokens for this user
+    await Token.deleteMany({ user: user._id });
+
+    return res.status(StatusCodes.OK).json({
+      success: true,
+      message: 'Oturum başarıyla kaldırıldı'
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Get All Active Sessions - Returns users that have valid tokens
+// Accepts optional email list from request body to filter sessions
+// If no email list provided, returns all sessions (for backward compatibility, but frontend should always send emails)
+const getAllActiveSessions = async (req, res, next) => {
+  try {
+    // Get email list from request body (optional, for security)
+    const { emails } = req.body || {};
+    
+    // Build query - if emails provided, only check those users
+    let userQuery = {};
+    if (emails && Array.isArray(emails) && emails.length > 0) {
+      // Find users with these emails first
+      const users = await User.find({ email: { $in: emails } }).select('_id');
+      const userIds = users.map(u => u._id);
+      userQuery = { user: { $in: userIds } };
+    }
+    
+    // Get valid tokens from database (only for requested emails if provided)
+    const validTokens = await Token.find({ 
+      isValid: true,
+      ...userQuery
+    })
+      .populate({
+        path: 'user',
+        select: 'name surname email profile picture gender',
+        populate: {
+          path: 'profile',
+          select: 'picture'
+        }
+      })
+      .sort({ updatedAt: -1 }); // Most recent first
+
+    // Group tokens by user email and get unique users
+    const userMap = new Map();
+    
+    validTokens.forEach(token => {
+      if (token.user && token.user.email) {
+        const email = token.user.email;
+        // If emails filter was provided, only include those emails
+        if (emails && Array.isArray(emails) && emails.length > 0 && !emails.includes(email)) {
+          return; // Skip this token
+        }
+        
+        if (!userMap.has(email)) {
+          userMap.set(email, {
+            email: email,
+            user: {
+              _id: token.user._id,
+              name: token.user.name,
+              surname: token.user.surname,
+              email: token.user.email,
+              picture: token.user.profile?.picture || token.user.picture || getLogoByGender(token.user.gender),
+              gender: token.user.gender
+            },
+            loginTime: token.createdAt || new Date(),
+            lastActivity: token.updatedAt || new Date()
+          });
+        } else {
+          // Update last activity if this token is more recent
+          const existing = userMap.get(email);
+          if (token.updatedAt > existing.lastActivity) {
+            existing.lastActivity = token.updatedAt;
+          }
+        }
+      }
+    });
+
+    // Convert map to array
+    const sessions = Array.from(userMap.values());
+    
+    return res.status(StatusCodes.OK).json({
+      success: true,
+      sessions: sessions
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // Switch Active Account (without re-login, if a previous session exists on this device)
 const switchActive = async (req, res, next) => {
   try {
@@ -2012,14 +2117,52 @@ const switchActive = async (req, res, next) => {
       return res.status(StatusCodes.NOT_FOUND).json({ message: 'Kullanıcı bulunamadı' });
     }
 
+    // Check if user is inactive
+    if (user.status === 'inactive') {
+      return res.status(StatusCodes.FORBIDDEN).json({ message: 'Hesabınız pasif durumda. Lütfen yönetici ile iletişime geçin.' });
+    }
+
     // Check if there is an existing token/session for this user from this device
-    const existingToken = await Token.findOne({ 
+    let existingToken = await Token.findOne({ 
       user: user._id,
       userAgent: req.headers['user-agent']
     });
 
+    // If no token exists for this device, create a new one
+    // This allows switching to accounts that were logged in from other devices
     if (!existingToken) {
-      return res.status(StatusCodes.CONFLICT).json({ message: 'Bu hesap için mevcut oturum bulunamadı. Lütfen bir kez giriş yapın.' });
+      // Check if user has any valid token (from any device)
+      const anyToken = await Token.findOne({ 
+        user: user._id,
+        isValid: true
+      });
+
+      if (!anyToken) {
+        // No token exists at all - user needs to login first
+        return res.status(StatusCodes.CONFLICT).json({ message: 'Bu hesap için mevcut oturum bulunamadı. Lütfen bir kez giriş yapın.' });
+      }
+
+      // Create a new token for this device
+      const accessToken = await generateToken(
+        { userId: user._id, role: user.role },
+        '365d',
+        process.env.ACCESS_TOKEN_SECRET
+      );
+      const refreshToken = await generateToken(
+        { userId: user._id, role: user.role },
+        '365d',
+        process.env.REFRESH_TOKEN_SECRET
+      );
+
+      existingToken = new Token({
+        refreshToken,
+        accessToken,
+        ip: req.ip,
+        userAgent: req.headers['user-agent'],
+        user: user._id,
+        isValid: true
+      });
+      await existingToken.save();
     }
 
     // Generate fresh tokens and set cookies as active
@@ -2057,6 +2200,7 @@ const switchActive = async (req, res, next) => {
     existingToken.accessToken = accessToken;
     existingToken.refreshToken = refreshToken;
     existingToken.ip = req.ip;
+    existingToken.isValid = true;
     await existingToken.save();
 
     return res.status(StatusCodes.OK).json({
@@ -2085,6 +2229,8 @@ module.exports = {
   googleLogin,
   logout,
   switchActive,
+  getAllActiveSessions,
+  removeSession,
   verifyRecoveryEmail,
   forgotPassword,
   resetPassword,
